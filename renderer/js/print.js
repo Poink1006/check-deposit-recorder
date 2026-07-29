@@ -28,27 +28,21 @@ export async function openPrintPreview(deposit) {
   }
 
   const calib = await window.api.getCalibration();
-  let mode = 'overlay';
 
-  // Build the modal shell once.
+  // Build the modal shell once. Always the full form (grid + labels).
   modalEl = document.createElement('div');
   modalEl.className = 'modal-backdrop';
   modalEl.innerHTML = `
     <div class="modal">
       <div class="modal-head">
         <strong>Print preview</strong>
-        <div class="tab-toggle" role="tablist">
-          <button class="tab active" data-mode="overlay">Overlay (form)</button>
-          <button class="tab" data-mode="full">Full form (plain paper)</button>
-        </div>
         <span class="spacer"></span>
         <button class="btn btn-ghost" data-act="pdf">Save as PDF…</button>
         <button class="btn" data-act="print">Print…</button>
         <button class="icon-btn" data-act="close" title="Close">×</button>
       </div>
       <div class="modal-hint muted">
-        Overlay prints only the line numbers &amp; amounts to feed onto the bank
-        form. Full form adds the grid &amp; labels for plain paper. Position is
+        The deposit slip with grid &amp; labels. Position on the page is
         controlled by <b>Calibration</b>.
       </div>
       <div class="modal-body">
@@ -57,38 +51,26 @@ export async function openPrintPreview(deposit) {
     </div>`;
 
   const frame = modalEl.querySelector('.preview-frame');
-  const render = () => {
-    frame.srcdoc = buildDepositSheet(deposit, calib, mode);
-  };
-
-  modalEl.querySelectorAll('.tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      mode = btn.dataset.mode;
-      modalEl.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-      render();
-    });
-  });
+  const html = () => buildDepositSheet(deposit, calib, 'full');
+  frame.srcdoc = html();
 
   modalEl.querySelector('[data-act="close"]').addEventListener('click', close);
   modalEl.addEventListener('click', (e) => { if (e.target === modalEl) close(); });
   document.addEventListener('keydown', onEsc);
 
   modalEl.querySelector('[data-act="print"]').addEventListener('click', async () => {
-    const html = buildDepositSheet(deposit, calib, mode);
-    const res = await window.api.printSheet(html);
+    const res = await window.api.printSheet(html());
     if (res && res.success === false && res.failureReason && res.failureReason !== 'cancelled') {
       toast('Print failed: ' + res.failureReason, 'error');
     }
   });
 
   modalEl.querySelector('[data-act="pdf"]').addEventListener('click', async () => {
-    const html = buildDepositSheet(deposit, calib, mode);
-    const res = await window.api.savePdf(html, suggestedPdfName(deposit));
+    const res = await window.api.savePdf(html(), suggestedPdfName(deposit));
     if (res && !res.canceled) toast('Saved PDF: ' + res.filePath, 'success');
   });
 
   document.body.appendChild(modalEl);
-  render();
 }
 
 function onEsc(e) {

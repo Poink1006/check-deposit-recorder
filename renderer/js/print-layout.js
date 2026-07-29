@@ -150,11 +150,11 @@ function gridLayer() {
   return html;
 }
 
-/** Build a mm ruler layer (fixed to the page) for the alignment test sheet. */
-function rulerLayer() {
+/** Build a mm ruler layer (fixed to the page) spanning `maxX` mm across. */
+function rulerLayer(maxX) {
   let html = '<div class="ruler">';
   // Vertical minor/major lines every 5/10 mm with x labels along the top.
-  for (let x = 0; x <= Math.floor(PAGE.w); x += 5) {
+  for (let x = 0; x <= maxX; x += 5) {
     const major = x % 10 === 0;
     html += `<div class="rline v ${major ? 'major' : ''}" style="left:${x}mm;top:0;height:${PAGE.h}mm"></div>`;
     if (major && x > 0) html += `<div class="rlabel v" style="left:${x}mm;top:1mm">${x}</div>`;
@@ -162,15 +162,16 @@ function rulerLayer() {
   // Horizontal minor/major lines every 5/10 mm with y labels along the left.
   for (let y = 0; y <= Math.floor(PAGE.h); y += 5) {
     const major = y % 10 === 0;
-    html += `<div class="rline h ${major ? 'major' : ''}" style="top:${y}mm;left:0;width:${PAGE.w}mm"></div>`;
+    html += `<div class="rline h ${major ? 'major' : ''}" style="top:${y}mm;left:0;width:${maxX}mm"></div>`;
     if (major && y > 0) html += `<div class="rlabel h" style="top:${y}mm;left:1mm">${y}</div>`;
   }
   html += '</div>';
   return html;
 }
 
-// Shared document CSS. `mode`/`calib` drive the calibrated transform.
-function docShell(calib, bodyHtml, extraCss = '') {
+// Shared document CSS. `calib` drives the calibrated transform; `sheetW` lets
+// the alignment grid be a touch wider than the page so its full ruler shows.
+function docShell(calib, bodyHtml, extraCss = '', sheetW = PAGE.w) {
   const { offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1 } = calib || {};
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     @page { size: Legal portrait; margin: 0; }
@@ -178,7 +179,7 @@ function docShell(calib, bodyHtml, extraCss = '') {
     html, body { margin: 0; padding: 0; }
     .sheet {
       position: relative;
-      width: ${PAGE.w}mm;
+      width: ${sheetW}mm;
       height: ${PAGE.h}mm;
       background: #fff;
       overflow: hidden;
@@ -206,12 +207,14 @@ function docShell(calib, bodyHtml, extraCss = '') {
     .hline { position: absolute; border-top: 0.2mm solid #000; }
     .vline { position: absolute; border-left: 0.2mm solid #000; }
     ${extraCss}
-    /* On-screen preview: dark backdrop + scaled page. Print stays 1:1. */
+    /* On-screen preview: dark backdrop + scaled page. Print stays 1:1.
+       Use zoom (not transform) so the shrunk page also takes less LAYOUT space
+       — otherwise the unscaled box overflows the pane and clips the right half. */
     @media screen {
       body { background: #525659; display: flex; justify-content: center; padding: 14px 0; }
-      .sheet { box-shadow: 0 0 10px rgba(0,0,0,.55); transform: scale(var(--preview-scale, 0.62)); transform-origin: top center; }
+      .sheet { box-shadow: 0 0 10px rgba(0,0,0,.55); zoom: var(--preview-scale, 0.62); }
     }
-    @media print { body { background: #fff; } .sheet { transform: none; } }
+    @media print { body { background: #fff; } .sheet { zoom: 1; } }
   </style></head><body><div class="sheet">${bodyHtml}</div></body></html>`;
 }
 
@@ -232,6 +235,9 @@ export function buildDepositSheet(deposit, calib, mode = 'overlay') {
  * CURRENT calibration — print it, hold it to the bank form, and nudge offsets.
  */
 export function buildAlignmentGrid(calib) {
+  // Draw the ruler a little past the Legal width so the whole form plus a
+  // margin of scale is visible (Legal is 215.9 mm wide).
+  const GRID_W = 220;
   const rulerCss = `
     .ruler .rline { position: absolute; }
     .ruler .rline.v { border-left: 0.1mm solid rgba(0,120,200,.25); }
@@ -242,7 +248,7 @@ export function buildAlignmentGrid(calib) {
     .ruler .rlabel.v { transform: translateX(-50%); }
     .ruler .rlabel.h { transform: translateY(-50%); }`;
   const body =
-    rulerLayer() +
+    rulerLayer(GRID_W) +
     `<div class="calib">${gridLayer()}${numberLayer({ items: [] }, { placeholders: true })}</div>`;
-  return docShell(calib, body, rulerCss);
+  return docShell(calib, body, rulerCss, GRID_W);
 }

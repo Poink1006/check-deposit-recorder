@@ -132,14 +132,19 @@ export function renderDepositForm(container, opts = {}) {
     }
   });
 
-  // Enter jumps to the same column on the next row (4 inputs per row).
+  // Move between cells with the arrow keys instead of nudging the number value.
+  // Each row has 4 amount inputs, so up/down is ±4 in the flat list; Enter also
+  // steps down. Left/Right keep their normal text-cursor behaviour.
   const inputs = [...body.querySelectorAll('.amount-input')];
   body.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || !e.target.classList.contains('amount-input')) return;
-    e.preventDefault();
+    if (!e.target.classList.contains('amount-input')) return;
+    let target = null;
     const i = inputs.indexOf(e.target);
-    const next = inputs[i + 4];
-    if (next) next.focus();
+    if (e.key === 'ArrowDown' || e.key === 'Enter') target = inputs[i + 4];
+    else if (e.key === 'ArrowUp') target = inputs[i - 4];
+    else return;
+    e.preventDefault(); // stop the number input from incrementing/decrementing
+    if (target) { target.focus(); target.select(); }
   });
 }
 
