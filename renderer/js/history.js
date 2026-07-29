@@ -111,7 +111,7 @@ function renderRows(view, rows) {
     .join('');
 
   body.querySelectorAll('.row-link').forEach((tr) =>
-    tr.addEventListener('click', () => openDetail(view, Number(tr.dataset.id)))
+    tr.addEventListener('click', () => openDetail(view, tr.dataset.id))
   );
 }
 
@@ -150,7 +150,7 @@ async function openDetail(view, id) {
   backdrop.innerHTML = `
     <div class="modal detail-modal">
       <div class="modal-head">
-        <strong>Deposit #${dep.id} — ${dep.deposit_date}</strong>
+        <strong>Deposit — ${dep.deposit_date}</strong>
         <span class="spacer"></span>
         <button class="icon-btn" data-act="close" title="Close">×</button>
       </div>
@@ -195,16 +195,16 @@ async function openDetail(view, id) {
   backdrop.querySelector('[data-act="duplicate"]').addEventListener('click', async () => {
     const newId = await window.api.duplicateDeposit(dep.id, todayISO());
     close();
-    toast(`Duplicated as deposit #${newId}, dated today. Opening for edit…`, 'success');
+    toast('Duplicated to a new deposit dated today. Opening for edit…', 'success');
     const fresh = await window.api.getDeposit(newId);
     editDeposit(fresh);
   });
 
   backdrop.querySelector('[data-act="delete"]').addEventListener('click', async () => {
-    if (!confirm(`Delete deposit #${dep.id} (${dep.deposit_date}, ${peso(dep.grand_total)})?\nThis cannot be undone.`)) return;
+    if (!confirm(`Delete this deposit (${dep.deposit_date}, ${peso(dep.grand_total)})?\nThis cannot be undone.`)) return;
     await window.api.deleteDeposit(dep.id);
     close();
-    toast(`Deleted deposit #${dep.id}.`, 'info');
+    toast('Deposit deleted.', 'info');
     renderHistory(view); // refresh the list
   });
 

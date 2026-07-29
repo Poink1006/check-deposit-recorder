@@ -19,6 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const db = require('./db');
+const sync = require('./sync');
 
 let mainWindow = null;
 
@@ -82,6 +83,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    show: false, // reveal maximized once ready, to avoid a small-window flash
     title: 'Check Deposit Recorder',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
@@ -89,6 +91,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // Open maximized — a full window (title bar + minimize/maximize/close stay),
+  // not kiosk/fullscreen. The 1200×900 above is the size when un-maximized.
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+    mainWindow.show();
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -100,23 +109,34 @@ ipcMain.handle('db:getPath', () => db.getDbPath());
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
 
-ipcMain.handle('db:createDeposit', (_evt, header, items) =>
-  db.createDeposit(header, items)
-);
+// After any local change, nudge a sync so it reaches the other computers soon.
+ipcMain.handle('db:createDeposit', (_evt, header, items) => {
+  const r = db.createDeposit(header, items);
+  sync.scheduleSoon();
+  return r;
+});
 
-ipcMain.handle('db:updateDeposit', (_evt, id, header, items) =>
-  db.updateDeposit(id, header, items)
-);
+ipcMain.handle('db:updateDeposit', (_evt, id, header, items) => {
+  const r = db.updateDeposit(id, header, items);
+  sync.scheduleSoon();
+  return r;
+});
 
 ipcMain.handle('db:getDeposit', (_evt, id) => db.getDeposit(id));
 
 ipcMain.handle('db:listDeposits', (_evt, filters) => db.listDeposits(filters));
 
-ipcMain.handle('db:deleteDeposit', (_evt, id) => db.deleteDeposit(id));
+ipcMain.handle('db:deleteDeposit', (_evt, id) => {
+  const r = db.deleteDeposit(id);
+  sync.scheduleSoon();
+  return r;
+});
 
-ipcMain.handle('db:duplicateDeposit', (_evt, id, newDate) =>
-  db.duplicateDeposit(id, newDate)
-);
+ipcMain.handle('db:duplicateDeposit', (_evt, id, newDate) => {
+  const r = db.duplicateDeposit(id, newDate);
+  sync.scheduleSoon();
+  return r;
+});
 
 // Open the folder that contains the database file (used by Settings later).
 ipcMain.handle('app:openDbFolder', () => {
@@ -133,6 +153,19 @@ ipcMain.handle('settings:saveCalibration', (_evt, calib) => db.saveCalibration(c
 
 ipcMain.handle('settings:getDefaults', () => db.getDefaults());
 ipcMain.handle('settings:saveDefaults', (_evt, d) => db.saveDefaults(d));
+
+// ---- IPC: Supabase sync -----------------------------------------------------
+
+ipcMain.handle('sync:getConfig', () => db.getSyncConfig());
+ipcMain.handle('sync:saveConfig', (_evt, cfg) => {
+  const saved = db.saveSyncConfig(cfg);
+  sync.init(saved);     // re-create the client with the new config
+  sync.scheduleSoon();  // sync promptly now that it's connected
+  return saved;
+});
+ipcMain.handle('sync:test', () => sync.testConnection());
+ipcMain.handle('sync:now', () => sync.syncNow());
+ipcMain.handle('sync:status', () => sync.status());
 
 // ---- IPC: backup / restore / CSV -------------------------------------------
 
@@ -228,9 +261,19 @@ ipcMain.handle('print:pdf', async (_evt, html, suggestedName) => {
 app.whenReady().then(() => {
   // Open/create the database before any window can query it.
   db.init(app.getPath('userData'));
+  sync.init(db.getSyncConfig()); // set up the Supabase client if configured
+
+  // After each sync, push the status to the renderer; if the pull brought new
+  // data, tell it to refresh the current view.
+  sync.setNotifier((result) => {
+    if (!mainWindow) return;
+    mainWindow.webContents.send('sync:status', sync.status());
+    if (result.ok && result.pulled > 0) mainWindow.webContents.send('sync:changed');
+  });
 
   createWindow();
   setupAutoUpdater();
+  sync.startAuto(); // periodic background sync (+ one on launch)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

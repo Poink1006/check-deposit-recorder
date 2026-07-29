@@ -37,6 +37,25 @@ contextBridge.exposeInMainWorld('api', {
   getDefaults: () => ipcRenderer.invoke('settings:getDefaults'),
   saveDefaults: (d) => ipcRenderer.invoke('settings:saveDefaults', d),
 
+  // Supabase sync config.
+  getSyncConfig: () => ipcRenderer.invoke('sync:getConfig'),
+  saveSyncConfig: (cfg) => ipcRenderer.invoke('sync:saveConfig', cfg),
+  testSync: () => ipcRenderer.invoke('sync:test'),
+
+  // Supabase sync runtime.
+  syncNow: () => ipcRenderer.invoke('sync:now'),
+  getSyncStatus: () => ipcRenderer.invoke('sync:status'),
+  onSyncStatus: (cb) => {
+    const h = (_e, st) => cb(st);
+    ipcRenderer.on('sync:status', h);
+    return () => ipcRenderer.removeListener('sync:status', h);
+  },
+  onSyncChanged: (cb) => {
+    const h = () => cb();
+    ipcRenderer.on('sync:changed', h);
+    return () => ipcRenderer.removeListener('sync:changed', h);
+  },
+
   // Backup / restore / CSV.
   exportBackup: () => ipcRenderer.invoke('backup:export'),
   restoreBackup: () => ipcRenderer.invoke('backup:restore'),

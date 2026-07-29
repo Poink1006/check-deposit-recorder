@@ -31,7 +31,7 @@ export function renderDepositForm(container, opts = {}) {
 
   container.innerHTML = `
     <div class="view-head">
-      <h2>${editingId ? 'Edit deposit #' + editingId : 'New deposit'}</h2>
+      <h2>${editingId ? 'Edit deposit' : 'New deposit'}</h2>
     </div>
 
     <section class="card">
@@ -238,10 +238,10 @@ async function save(container) {
   try {
     if (editingId) {
       await window.api.updateDeposit(editingId, header, items);
-      toast(`Saved changes to deposit #${editingId}.`, 'success');
+      toast('Saved changes.', 'success');
     } else {
-      const id = await window.api.createDeposit(header, items);
-      toast(`Saved deposit #${id} (${items.length} lines).`, 'success');
+      await window.api.createDeposit(header, items);
+      toast(`Saved deposit (${items.length} lines).`, 'success');
       renderDepositForm(container); // fresh form for the next entry
     }
   } catch (err) {

@@ -15,6 +15,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
 let db = null;
@@ -29,11 +30,30 @@ function money(n) {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
 
+/** Globally-unique id, so records made on different computers never collide. */
+function uuid() {
+  return crypto.randomUUID();
+}
+
+/** Current instant as ISO-8601 UTC — comparable across machines for LWW sync. */
+function nowIso() {
+  return new Date().toISOString();
+}
+
+/** Convert an old SQLite datetime('now') string ('YYYY-MM-DD HH:MM:SS') to ISO. */
+function toIso(s) {
+  if (!s) return nowIso();
+  const str = String(s);
+  const d = str.includes('T') ? new Date(str) : new Date(str.replace(' ', 'T') + 'Z');
+  return isNaN(d.getTime()) ? nowIso() : d.toISOString();
+}
+
 /**
  * Open (and if needed create) the database at the given directory.
  * Called once from the main process with app.getPath('userData').
  */
 function init(userDataDir) {
+  if (db && db.open) db.close(); // close any prior connection first
   dataDir = userDataDir;
   dbFilePath = path.join(userDataDir, 'deposits.db');
   db = new Database(dbFilePath);
@@ -42,10 +62,39 @@ function init(userDataDir) {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
+  // Settings first (holds schema_version and sync bookkeeping).
+  db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+
+  // Decide schema state: fresh, legacy (v1, integer ids), or current (v2, uuid).
+  const hasDeposits = db
+    .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='deposits'`)
+    .get();
+  if (!hasDeposits) {
+    createV2Schema();
+  } else {
+    const idCol = db.prepare(`PRAGMA table_info(deposits)`).all().find((c) => c.name === 'id');
+    if (idCol && /INT/i.test(idCol.type)) {
+      migrateV1toV2(); // upgrade existing integer-id data to uuids in place
+    } else {
+      createV2Schema(); // already v2 (CREATE IF NOT EXISTS is a no-op)
+    }
+  }
+
+  return dbFilePath;
+}
+
+/**
+ * v2 schema — the sync-ready shape:
+ *   * TEXT (uuid) primary keys so different computers never collide
+ *   * created_at / updated_at as ISO-8601 UTC (comparable for last-write-wins)
+ *   * deleted_at for soft deletes (so removals propagate through sync)
+ *   * dirty flag (1 = changed locally, needs pushing to Supabase)
+ */
+function createV2Schema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS deposits (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      deposit_date   TEXT    NOT NULL,          -- 'YYYY-MM-DD', the field searched by
+      id             TEXT    PRIMARY KEY,
+      deposit_date   TEXT    NOT NULL,
       bank           TEXT    NOT NULL DEFAULT 'RCBC',
       account_name   TEXT,
       account_number TEXT,
@@ -54,13 +103,15 @@ function init(userDataDir) {
       cash_total     REAL    NOT NULL DEFAULT 0,
       check_total    REAL    NOT NULL DEFAULT 0,
       grand_total    REAL    NOT NULL DEFAULT 0,
-      created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+      created_at     TEXT    NOT NULL,
+      updated_at     TEXT    NOT NULL,
+      deleted_at     TEXT,
+      dirty          INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS deposit_items (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      deposit_id   INTEGER NOT NULL REFERENCES deposits(id) ON DELETE CASCADE,
+      id           TEXT    PRIMARY KEY,
+      deposit_id   TEXT    NOT NULL REFERENCES deposits(id) ON DELETE CASCADE,
       section      TEXT    NOT NULL CHECK (section IN ('CASH','CHECK')),
       line_no      INTEGER NOT NULL CHECK (line_no BETWEEN 1 AND 24),
       amount       REAL    NOT NULL,
@@ -70,18 +121,52 @@ function init(userDataDir) {
       remarks      TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_items_deposit ON deposit_items(deposit_id);
-    CREATE INDEX IF NOT EXISTS idx_deposits_date ON deposits(deposit_date);
-
-    -- Small key/value store for app settings (print calibration, default
-    -- bank/account, etc). Values are JSON strings.
-    CREATE TABLE IF NOT EXISTS settings (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
+    CREATE INDEX IF NOT EXISTS idx_items_deposit  ON deposit_items(deposit_id);
+    CREATE INDEX IF NOT EXISTS idx_deposits_date  ON deposits(deposit_date);
+    CREATE INDEX IF NOT EXISTS idx_deposits_dirty ON deposits(dirty);
   `);
+  setSetting('schema_version', 2);
+}
 
-  return dbFilePath;
+/** One-time migration of a legacy (integer-id) database to the v2 uuid schema. */
+function migrateV1toV2() {
+  const tx = db.transaction(() => {
+    db.exec(`ALTER TABLE deposits      RENAME TO deposits_v1;`);
+    db.exec(`ALTER TABLE deposit_items RENAME TO deposit_items_v1;`);
+    createV2Schema();
+
+    const insDep = db.prepare(`
+      INSERT INTO deposits
+        (id, deposit_date, bank, account_name, account_number, reference_no, notes,
+         cash_total, check_total, grand_total, created_at, updated_at, deleted_at, dirty)
+      VALUES
+        (@id, @deposit_date, @bank, @account_name, @account_number, @reference_no, @notes,
+         @cash_total, @check_total, @grand_total, @created_at, @updated_at, NULL, 1)`);
+    const insItem = db.prepare(`
+      INSERT INTO deposit_items
+        (id, deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
+      VALUES
+        (@id, @deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)`);
+
+    const idMap = new Map(); // old integer id -> new uuid
+    for (const d of db.prepare(`SELECT * FROM deposits_v1`).all()) {
+      const nid = uuid();
+      idMap.set(d.id, nid);
+      insDep.run({
+        ...d, id: nid,
+        created_at: toIso(d.created_at),
+        updated_at: toIso(d.updated_at),
+      });
+    }
+    for (const it of db.prepare(`SELECT * FROM deposit_items_v1`).all()) {
+      const ndid = idMap.get(it.deposit_id);
+      if (!ndid) continue;
+      insItem.run({ ...it, id: uuid(), deposit_id: ndid });
+    }
+
+    db.exec(`DROP TABLE deposit_items_v1; DROP TABLE deposits_v1;`);
+  });
+  tx();
 }
 
 // ---- settings (key/value JSON) ---------------------------------------------
@@ -138,6 +223,108 @@ function saveDefaults(d) {
   });
 }
 
+/** Supabase sync config (per machine; the key never ships in the app). */
+function getSyncConfig() {
+  return { url: '', key: '', ...(getSetting('sync') || {}) };
+}
+
+function saveSyncConfig(cfg) {
+  return setSetting('sync', {
+    url: (cfg.url || '').trim(),
+    key: (cfg.key || '').trim(),
+  });
+}
+
+// ---- sync bookkeeping (used by sync.js) ------------------------------------
+
+/** Highest remote updated_at we've pulled, so we only fetch newer rows. */
+function getWatermark() {
+  return getSetting('sync_watermark', null);
+}
+function setWatermark(ts) {
+  return setSetting('sync_watermark', ts);
+}
+
+/** Locally-changed deposits awaiting push (includes soft-deleted), with items. */
+function getDirtyDeposits() {
+  const deps = db.prepare('SELECT * FROM deposits WHERE dirty = 1').all();
+  const itemsStmt = db.prepare('SELECT * FROM deposit_items WHERE deposit_id = ?');
+  return deps.map((d) => ({ ...d, items: itemsStmt.all(d.id) }));
+}
+
+/** How many deposits are still pending a push (for the sync status badge). */
+function getPendingCount() {
+  return db.prepare('SELECT COUNT(*) AS n FROM deposits WHERE dirty = 1').get().n;
+}
+
+/**
+ * Clear the dirty flag after a successful push — but only if the row hasn't
+ * changed again since (updated_at still matches), so a concurrent local edit
+ * during the push isn't silently marked as synced.
+ */
+function clearDirty(pushed) {
+  const stmt = db.prepare('UPDATE deposits SET dirty = 0 WHERE id = @id AND updated_at = @updated_at');
+  const tx = db.transaction(() => pushed.forEach((p) => stmt.run(p)));
+  tx();
+}
+
+/** {updated_at, deleted_at} for LWW comparison during pull, or null. */
+function getDepositMeta(id) {
+  return db.prepare('SELECT updated_at, deleted_at FROM deposits WHERE id = ?').get(id) || null;
+}
+
+/**
+ * Overwrite a local deposit + its items from a remote (Supabase) copy, marked
+ * clean (dirty=0). Called by pull only when the remote is the winner (or new).
+ */
+function applyRemote(dep, items) {
+  const insDep = db.prepare(`
+    INSERT OR REPLACE INTO deposits
+      (id, deposit_date, bank, account_name, account_number, reference_no, notes,
+       cash_total, check_total, grand_total, created_at, updated_at, deleted_at, dirty)
+    VALUES
+      (@id, @deposit_date, @bank, @account_name, @account_number, @reference_no, @notes,
+       @cash_total, @check_total, @grand_total, @created_at, @updated_at, @deleted_at, 0)`);
+  const insItem = db.prepare(`
+    INSERT INTO deposit_items
+      (id, deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
+    VALUES
+      (@id, @deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)`);
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM deposit_items WHERE deposit_id = ?').run(dep.id);
+    insDep.run({
+      id: dep.id,
+      deposit_date: dep.deposit_date,
+      bank: dep.bank || 'RCBC',
+      account_name: dep.account_name ?? null,
+      account_number: dep.account_number ?? null,
+      reference_no: dep.reference_no ?? null,
+      notes: dep.notes ?? null,
+      cash_total: dep.cash_total ?? 0,
+      check_total: dep.check_total ?? 0,
+      grand_total: dep.grand_total ?? 0,
+      created_at: dep.created_at,
+      updated_at: dep.updated_at,
+      deleted_at: dep.deleted_at ?? null,
+    });
+    for (const it of items || []) {
+      insItem.run({
+        id: it.id,
+        deposit_id: dep.id,
+        section: it.section,
+        line_no: it.line_no,
+        amount: money(it.amount),
+        check_no: it.check_no ?? null,
+        drawee_bank: it.drawee_bank ?? null,
+        check_date: it.check_date ?? null,
+        remarks: it.remarks ?? null,
+      });
+    }
+  });
+  tx();
+}
+
 // ---- backup / restore / CSV ------------------------------------------------
 
 /**
@@ -186,7 +373,7 @@ function restoreFrom(srcPath) {
   }
   init(dataDir);
 
-  const count = db.prepare('SELECT COUNT(*) AS n FROM deposits').get().n;
+  const count = db.prepare('SELECT COUNT(*) AS n FROM deposits WHERE deleted_at IS NULL').get().n;
   return { deposits: count };
 }
 
@@ -257,38 +444,43 @@ function createDeposit(header, items) {
   }
 
   const totals = computeTotals(items);
+  const id = uuid();
+  const ts = nowIso();
 
   const insertDeposit = db.prepare(`
     INSERT INTO deposits
-      (deposit_date, bank, account_name, account_number, reference_no, notes,
-       cash_total, check_total, grand_total)
+      (id, deposit_date, bank, account_name, account_number, reference_no, notes,
+       cash_total, check_total, grand_total, created_at, updated_at, deleted_at, dirty)
     VALUES
-      (@deposit_date, @bank, @account_name, @account_number, @reference_no, @notes,
-       @cash_total, @check_total, @grand_total)
+      (@id, @deposit_date, @bank, @account_name, @account_number, @reference_no, @notes,
+       @cash_total, @check_total, @grand_total, @created_at, @updated_at, NULL, 1)
   `);
 
   const insertItem = db.prepare(`
     INSERT INTO deposit_items
-      (deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
+      (id, deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
     VALUES
-      (@deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)
+      (@id, @deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)
   `);
 
   const tx = db.transaction(() => {
-    const info = insertDeposit.run({
+    insertDeposit.run({
+      id,
       deposit_date: header.deposit_date,
       bank: header.bank || 'RCBC',
       account_name: header.account_name || null,
       account_number: header.account_number || null,
       reference_no: header.reference_no || null,
       notes: header.notes || null,
+      created_at: ts,
+      updated_at: ts,
       ...totals,
     });
-    const depositId = info.lastInsertRowid;
 
     for (const it of items) {
       insertItem.run({
-        deposit_id: depositId,
+        id: uuid(),
+        deposit_id: id,
         section: it.section,
         line_no: it.line_no,
         amount: money(it.amount),
@@ -298,7 +490,7 @@ function createDeposit(header, items) {
         remarks: it.remarks || null,
       });
     }
-    return depositId;
+    return id;
   });
 
   return tx();
@@ -328,16 +520,17 @@ function updateDeposit(id, header, items) {
       cash_total = @cash_total,
       check_total = @check_total,
       grand_total = @grand_total,
-      updated_at = datetime('now')
-    WHERE id = @id
+      updated_at = @updated_at,
+      dirty = 1
+    WHERE id = @id AND deleted_at IS NULL
   `);
 
   const deleteItems = db.prepare('DELETE FROM deposit_items WHERE deposit_id = ?');
   const insertItem = db.prepare(`
     INSERT INTO deposit_items
-      (deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
+      (id, deposit_id, section, line_no, amount, check_no, drawee_bank, check_date, remarks)
     VALUES
-      (@deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)
+      (@id, @deposit_id, @section, @line_no, @amount, @check_no, @drawee_bank, @check_date, @remarks)
   `);
 
   const tx = db.transaction(() => {
@@ -349,6 +542,7 @@ function updateDeposit(id, header, items) {
       account_number: header.account_number || null,
       reference_no: header.reference_no || null,
       notes: header.notes || null,
+      updated_at: nowIso(),
       ...totals,
     });
     if (info.changes === 0) return 0; // no such deposit; nothing else to do
@@ -356,6 +550,7 @@ function updateDeposit(id, header, items) {
     deleteItems.run(id);
     for (const it of items) {
       insertItem.run({
+        id: uuid(),
         deposit_id: id,
         section: it.section,
         line_no: it.line_no,
@@ -372,9 +567,11 @@ function updateDeposit(id, header, items) {
   return tx();
 }
 
-/** Fetch a single deposit with its items, or null. */
+/** Fetch a single (non-deleted) deposit with its items, or null. */
 function getDeposit(id) {
-  const deposit = db.prepare('SELECT * FROM deposits WHERE id = ?').get(id);
+  const deposit = db
+    .prepare('SELECT * FROM deposits WHERE id = ? AND deleted_at IS NULL')
+    .get(id);
   if (!deposit) return null;
   const items = db
     .prepare('SELECT * FROM deposit_items WHERE deposit_id = ? ORDER BY section, line_no')
@@ -390,7 +587,7 @@ function getDeposit(id) {
  *                via the items, check no / drawee bank / remarks.
  */
 function listDeposits(filters = {}) {
-  const where = [];
+  const where = ['d.deleted_at IS NULL'];
   const params = {};
 
   if (filters.from) { where.push('d.deposit_date >= @from'); params.from = filters.from; }
@@ -413,15 +610,22 @@ function listDeposits(filters = {}) {
   const sql = `
     SELECT d.*, (SELECT COUNT(*) FROM deposit_items i WHERE i.deposit_id = d.id) AS item_count
     FROM deposits d
-    ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY d.deposit_date DESC, d.id DESC`;
+    WHERE ${where.join(' AND ')}
+    ORDER BY d.deposit_date DESC, d.created_at DESC`;
 
   return db.prepare(sql).all(params);
 }
 
-/** Permanently delete a deposit; its items cascade (FK ON DELETE CASCADE). */
+/**
+ * Soft-delete a deposit (set deleted_at) so the removal syncs to other
+ * computers. The row + items stay locally but are hidden from all UI queries.
+ */
 function deleteDeposit(id) {
-  return db.prepare('DELETE FROM deposits WHERE id = ?').run(id).changes;
+  const ts = nowIso();
+  return db
+    .prepare(`UPDATE deposits SET deleted_at = @ts, updated_at = @ts, dirty = 1
+              WHERE id = @id AND deleted_at IS NULL`)
+    .run({ id, ts }).changes;
 }
 
 /**
@@ -469,6 +673,15 @@ module.exports = {
   DEFAULT_CALIBRATION,
   getDefaults,
   saveDefaults,
+  getSyncConfig,
+  saveSyncConfig,
+  getWatermark,
+  setWatermark,
+  getDirtyDeposits,
+  getPendingCount,
+  clearDirty,
+  getDepositMeta,
+  applyRemote,
   backupTo,
   restoreFrom,
   reopen,

@@ -12,6 +12,7 @@ import { renderCalibration } from './calibration.js';
 import { renderHistory } from './history.js';
 import { renderSettings } from './settings.js';
 import { initUpdateBanner } from './update-banner.js';
+import { initSyncStatus } from './sync-status.js';
 
 const view = document.getElementById('view');
 
@@ -28,8 +29,11 @@ function setActiveNav(id) {
   });
 }
 
+let currentView = 'new';
+
 /** Switch to a top-level view by id. */
 export function navigate(id) {
+  currentView = id;
   setActiveNav(id);
   if (id === 'new') {
     renderDepositForm(view);
@@ -64,6 +68,12 @@ navigate('new');
 
 // Wire the auto-update banner (no-op in unpacked/dev builds).
 initUpdateBanner();
+
+// Sync status badge, and refresh the History list when a pull brings new data.
+initSyncStatus();
+if (window.api.onSyncChanged) {
+  window.api.onSyncChanged(() => { if (currentView === 'history') navigate('history'); });
+}
 
 // Show the running app version in the header (handy for confirming updates).
 if (window.api.getVersion) {

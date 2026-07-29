@@ -12,10 +12,37 @@ import { toast, esc } from './util.js';
 import { navigate } from './app.js';
 
 export async function renderSettings(view) {
-  const dbPath = await window.api.getDbPath();
+  const [dbPath, syncCfg] = await Promise.all([
+    window.api.getDbPath(),
+    window.api.getSyncConfig(),
+  ]);
 
   view.innerHTML = `
     <div class="view-head"><h2>Settings</h2></div>
+
+    <section class="card">
+      <h3>Sync (Supabase)</h3>
+      <p class="muted">
+        Connect this computer to your shared office database so deposits sync
+        across all machines. Paste the Project URL and the publishable
+        (<code>sb_publishable_…</code>) key. Enter this once per computer.
+      </p>
+      <div class="field-grid">
+        <label class="field field-wide">
+          <span>Project URL</span>
+          <input type="text" id="y-url" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label class="field field-wide">
+          <span>Publishable key</span>
+          <input type="password" id="y-key" placeholder="sb_publishable_…" />
+        </label>
+      </div>
+      <div class="calib-actions">
+        <button class="btn" id="y-save">Save &amp; test connection</button>
+        <button class="btn btn-ghost" id="y-sync">Sync now</button>
+        <span class="muted" id="y-status"></span>
+      </div>
+    </section>
 
     <section class="card">
       <h3>Database</h3>
@@ -47,6 +74,36 @@ export async function renderSettings(view) {
     </section>`;
 
   const $ = (s) => view.querySelector(s);
+
+  // --- Sync config ---
+  $('#y-url').value = syncCfg.url || '';
+  $('#y-key').value = syncCfg.key || '';
+  $('#y-save').addEventListener('click', async () => {
+    const status = $('#y-status');
+    status.textContent = 'Saving…';
+    await window.api.saveSyncConfig({ url: $('#y-url').value, key: $('#y-key').value });
+    const res = await window.api.testSync();
+    if (res.ok) {
+      status.textContent = `Connected ✓ (${res.count} deposit(s) in the shared database).`;
+      toast('Sync connected.', 'success');
+    } else {
+      status.textContent = 'Connection failed: ' + res.error;
+      toast('Sync connection failed.', 'error');
+    }
+  });
+
+  $('#y-sync').addEventListener('click', async () => {
+    const status = $('#y-status');
+    status.textContent = 'Syncing…';
+    const res = await window.api.syncNow();
+    if (res.ok) {
+      status.textContent = `Synced ✓ (pushed ${res.pushed}, pulled ${res.pulled}).`;
+      toast('Sync complete.', 'success');
+    } else {
+      status.textContent = 'Sync failed: ' + res.error;
+      toast('Sync failed.', 'error');
+    }
+  });
 
   $('#s-openfolder').addEventListener('click', () => window.api.openDbFolder());
 
