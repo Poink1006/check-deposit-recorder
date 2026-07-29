@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('api', {
   getDbPath: () => ipcRenderer.invoke('db:getPath'),
   openDbFolder: () => ipcRenderer.invoke('app:openDbFolder'),
 
+  // App version (shown in the header).
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
+
   // Deposits.
   createDeposit: (header, items) =>
     ipcRenderer.invoke('db:createDeposit', header, items),

@@ -64,3 +64,14 @@ navigate('new');
 
 // Wire the auto-update banner (no-op in unpacked/dev builds).
 initUpdateBanner();
+
+// Show the running app version in the header (handy for confirming updates).
+if (window.api.getVersion) {
+  window.api.getVersion().then((v) => {
+    if (!v) return;
+    const tag = document.createElement('span');
+    tag.className = 'version-tag';
+    tag.textContent = 'v' + v;
+    document.querySelector('.app-header').appendChild(tag);
+  });
+}

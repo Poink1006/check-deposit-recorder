@@ -98,6 +98,8 @@ function createWindow() {
 
 ipcMain.handle('db:getPath', () => db.getDbPath());
 
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
 ipcMain.handle('db:createDeposit', (_evt, header, items) =>
   db.createDeposit(header, items)
 );

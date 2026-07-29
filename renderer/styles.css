@@ -49,6 +49,7 @@ body {
 }
 .nav-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .nav-btn.active { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.version-tag { margin-left: auto; color: rgba(255, 255, 255, 0.72); font-size: 12px; }
 
 /* ---- view / cards ---- */
 .view {
