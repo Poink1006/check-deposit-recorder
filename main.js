@@ -14,12 +14,36 @@
  */
 
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const db = require('./db');
 
 let mainWindow = null;
+
+/**
+ * Auto-update via electron-updater + GitHub Releases. Only packaged/installed
+ * builds have an update feed (running unpacked has nothing to check against).
+ * The renderer shows an in-app banner from the events we forward here.
+ */
+function setupAutoUpdater() {
+  // Let the renderer's banner trigger install-and-restart.
+  ipcMain.on('update:restart', () => autoUpdater.quitAndInstall());
+
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.on('update-available', (info) =>
+    mainWindow?.webContents.send('update:available', { version: info.version })
+  );
+  autoUpdater.on('update-downloaded', (info) =>
+    mainWindow?.webContents.send('update:downloaded', { version: info.version })
+  );
+  autoUpdater.on('error', (err) => console.error('Auto-update error:', err));
+
+  autoUpdater.checkForUpdates();
+}
 
 /**
  * Render an HTML string in a hidden, isolated window and hand its webContents
@@ -204,6 +228,7 @@ app.whenReady().then(() => {
   db.init(app.getPath('userData'));
 
   createWindow();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

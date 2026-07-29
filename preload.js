@@ -42,4 +42,17 @@ contextBridge.exposeInMainWorld('api', {
   // Printing.
   printSheet: (html) => ipcRenderer.invoke('print:sheet', html),
   savePdf: (html, suggestedName) => ipcRenderer.invoke('print:pdf', html, suggestedName),
+
+  // Auto-update banner hooks.
+  onUpdateAvailable: (cb) => {
+    const h = (_e, info) => cb(info);
+    ipcRenderer.on('update:available', h);
+    return () => ipcRenderer.removeListener('update:available', h);
+  },
+  onUpdateDownloaded: (cb) => {
+    const h = (_e, info) => cb(info);
+    ipcRenderer.on('update:downloaded', h);
+    return () => ipcRenderer.removeListener('update:downloaded', h);
+  },
+  restartToUpdate: () => ipcRenderer.send('update:restart'),
 });

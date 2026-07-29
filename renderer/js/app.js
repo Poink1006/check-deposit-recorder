@@ -11,6 +11,7 @@ import { renderDepositForm } from './deposit-form.js';
 import { renderCalibration } from './calibration.js';
 import { renderHistory } from './history.js';
 import { renderSettings } from './settings.js';
+import { initUpdateBanner } from './update-banner.js';
 
 const view = document.getElementById('view');
 
@@ -60,3 +61,6 @@ NAV.forEach((item) => {
 
 // Start on the New Deposit screen.
 navigate('new');
+
+// Wire the auto-update banner (no-op in unpacked/dev builds).
+initUpdateBanner();
