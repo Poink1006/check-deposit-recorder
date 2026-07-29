@@ -17,7 +17,8 @@ import { openPrintPreview } from './print.js';
 
 const ROWS = 12; // 12 rows × (2 cash + 2 check columns) = 24 cash + 24 check lines
 
-let editingId = null; // null = creating; otherwise editing this deposit id
+let editingId = null;       // null = creating; otherwise editing this deposit id
+let editingDeposit = null;  // the record being edited (to preserve hidden header fields)
 
 /**
  * Render the deposit form into `container`.
@@ -26,6 +27,7 @@ let editingId = null; // null = creating; otherwise editing this deposit id
 export function renderDepositForm(container, opts = {}) {
   const deposit = opts.deposit || null;
   editingId = deposit ? deposit.id : null;
+  editingDeposit = deposit;
 
   container.innerHTML = `
     <div class="view-head">
@@ -37,26 +39,6 @@ export function renderDepositForm(container, opts = {}) {
         <label class="field">
           <span>Deposit date <em>*</em></span>
           <input type="date" id="f-date" />
-        </label>
-        <label class="field">
-          <span>Bank</span>
-          <input type="text" id="f-bank" placeholder="RCBC" />
-        </label>
-        <label class="field">
-          <span>Account name</span>
-          <input type="text" id="f-acctname" />
-        </label>
-        <label class="field">
-          <span>Account number</span>
-          <input type="text" id="f-acctno" />
-        </label>
-        <label class="field">
-          <span>Reference no</span>
-          <input type="text" id="f-ref" placeholder="pickup / slip reference" />
-        </label>
-        <label class="field field-wide">
-          <span>Notes</span>
-          <input type="text" id="f-notes" />
         </label>
       </div>
     </section>
@@ -105,7 +87,7 @@ export function renderDepositForm(container, opts = {}) {
   const body = container.querySelector('#slip-body');
   const amt = (section, line) =>
     `<td class="amt"><input type="number" class="amount-input" step="0.01" min="0"
-       inputmode="decimal" placeholder="0.00" data-section="${section}" data-line="${line}" /></td>`;
+       inputmode="decimal" data-section="${section}" data-line="${line}" /></td>`;
 
   // 12 rows; each row: [cash L, cash R, gap, check L, check R].
   let rowsHtml = '';
@@ -120,22 +102,10 @@ export function renderDepositForm(container, opts = {}) {
   }
   body.innerHTML = rowsHtml;
 
-  // ---- header defaults / edit population ----
+  // ---- date + edit population ----
   container.querySelector('#f-date').value = deposit ? deposit.deposit_date : todayISO();
-  container.querySelector('#f-bank').value = deposit ? (deposit.bank || 'RCBC') : 'RCBC';
-  container.querySelector('#f-acctname').value = deposit?.account_name || '';
-  container.querySelector('#f-acctno').value = deposit?.account_number || '';
-  container.querySelector('#f-ref').value = deposit?.reference_no || '';
-  container.querySelector('#f-notes').value = deposit?.notes || '';
 
-  if (!deposit) {
-    // For a NEW deposit, pre-fill the header from the saved default values.
-    window.api.getDefaults().then((d) => {
-      if (d.bank) container.querySelector('#f-bank').value = d.bank;
-      container.querySelector('#f-acctname').value = d.account_name || '';
-      container.querySelector('#f-acctno').value = d.account_number || '';
-    });
-  } else {
+  if (deposit) {
     // Edit mode: drop each item's amount into its matching cell by section+line.
     for (const it of deposit.items) {
       const input = body.querySelector(
@@ -219,14 +189,18 @@ function collectItems(container) {
 }
 
 function readHeader(container) {
-  return {
-    deposit_date: container.querySelector('#f-date').value,
-    bank: container.querySelector('#f-bank').value.trim() || 'RCBC',
-    account_name: container.querySelector('#f-acctname').value.trim() || null,
-    account_number: container.querySelector('#f-acctno').value.trim() || null,
-    reference_no: container.querySelector('#f-ref').value.trim() || null,
-    notes: container.querySelector('#f-notes').value.trim() || null,
-  };
+  const header = { deposit_date: container.querySelector('#f-date').value };
+  // The header now only captures the date. When editing, carry the record's
+  // other (no-longer-shown) fields through so an edit never wipes them; new
+  // deposits let the DB apply its defaults (bank 'RCBC', the rest null).
+  if (editingDeposit) {
+    header.bank = editingDeposit.bank;
+    header.account_name = editingDeposit.account_name;
+    header.account_number = editingDeposit.account_number;
+    header.reference_no = editingDeposit.reference_no;
+    header.notes = editingDeposit.notes;
+  }
+  return header;
 }
 
 // Build a deposit-like object from the current form (no save) and open preview.
@@ -234,8 +208,7 @@ function previewCurrent(container) {
   const { items, hadError } = collectItems(container);
   if (hadError) { toast('Fix the highlighted amounts before printing.', 'error'); return; }
   if (items.length === 0) { toast('Add at least one amount before printing.', 'warn'); return; }
-  const h = readHeader(container);
-  openPrintPreview({ deposit_date: h.deposit_date, bank: h.bank, reference_no: h.reference_no, items });
+  openPrintPreview({ deposit_date: container.querySelector('#f-date').value, items });
 }
 
 async function save(container) {

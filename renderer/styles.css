@@ -54,9 +54,9 @@ body {
 .view {
   max-width: 1040px;
   margin: 0 auto;
-  padding: 20px 24px 120px; /* bottom padding clears the sticky totals bar */
+  padding: 14px 24px 76px; /* bottom padding clears the sticky totals bar */
 }
-.view-head { margin: 4px 0 14px; }
+.view-head { margin: 2px 0 10px; }
 .view-head h2 { margin: 0; font-size: 18px; }
 
 .card {
@@ -64,8 +64,10 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 16px 18px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
+/* The deposit form is designed to fit one screen; keep its cards tight. */
+.view .card:first-of-type { padding: 12px 18px; }
 
 .muted { color: var(--muted); }
 
@@ -147,39 +149,43 @@ input.invalid { border-color: var(--danger); background: #fdecec; }
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--ink);
-  padding: 8px 6px;
+  padding: 5px 6px;
   background: #f0f5f3;
 }
 .slip-cols th {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
-  padding: 4px 8px;
+  padding: 2px 8px;
   text-align: right;
 }
 .slip-table td.lineno {
-  width: 34px;
+  width: 42px;
   text-align: right;
   color: var(--muted);
-  padding: 2px 8px;
+  padding: 2px 12px;
   background: #fafcfb;
 }
-.slip-table td.amt { padding: 2px; }
+.slip-table td.amt { padding: 1px; }
 .slip-table td.amt input {
-  width: 108px;
+  width: 168px;
   border: 0;
-  padding: 6px 8px;
+  padding: 3px 12px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   background: transparent;
 }
 .slip-table td.amt input:focus { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 .slip-table td.amt input.invalid { background: #fdecec; border-radius: 4px; }
+/* Hide the number-input spinner arrows. */
+.slip-table td.amt input::-webkit-inner-spin-button,
+.slip-table td.amt input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.slip-table td.amt input { -moz-appearance: textfield; appearance: textfield; }
 /* the visual gutter between CASH and CHECKS */
-.slip-table .slip-gap { border: 0; width: 22px; background: transparent; }
+.slip-table .slip-gap { border: 0; width: 44px; background: transparent; }
 .slip-totals td {
   border: 0;
-  padding: 10px 8px 0;
+  padding: 6px 8px 0;
   text-align: right;
   font-size: 13px;
   color: var(--muted);

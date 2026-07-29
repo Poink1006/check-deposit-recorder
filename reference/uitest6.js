@@ -22,7 +22,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:listDeposits', (_e, f) => db.listDeposits(f));
 
   const win = new BrowserWindow({
-    width: 1240, height: 980, show: false,
+    width: 1200, height: 900, useContentSize: true, show: false,
     paintWhenInitiallyHidden: true, backgroundThrottling: false,
     webPreferences: { preload: path.join(__dirname, '..', 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
@@ -36,17 +36,22 @@ app.whenReady().then(async () => {
     };
     set('CASH', 1, '2000'); set('CASH', 13, '126000');
     set('CHECK', 1, '183313.41'); set('CHECK', 15, '94848.36');
-    document.querySelector('#f-ref').value = 'SLIP';
     return {
+      onlyDateField: document.querySelectorAll('.field-grid .field').length === 1 && !document.querySelector('#f-bank'),
       cash: document.getElementById('bar-cash').textContent,
       check: document.getElementById('bar-check').textContent,
       grand: document.getElementById('bar-grand').textContent,
       cashInputs: document.querySelectorAll('.amount-input[data-section="CASH"]').length,
       checkInputs: document.querySelectorAll('.amount-input[data-section="CHECK"]').length,
       hasCheckNo: !!document.querySelector('.ck-no'),
+      innerH: window.innerHeight,
+      scrollH: document.documentElement.scrollHeight,
     };
   })()`);
+  console.log('FIT innerHeight=' + totals.innerH + ' scrollHeight=' + totals.scrollH);
+  check('fits on one screen (no scroll @1200x900)', totals.scrollH <= totals.innerH + 2);
   console.log('TOTALS', totals.cash, '|', totals.check, '|', totals.grand);
+  check('header trimmed to date only', totals.onlyDateField === true);
   check('24 cash + 24 check cells', totals.cashInputs === 24 && totals.checkInputs === 24);
   check('no check-detail fields', totals.hasCheckNo === false);
   check('live totals correct', totals.cash === '₱ 128,000.00' && totals.check === '₱ 278,161.77' && totals.grand === '₱ 406,161.77');

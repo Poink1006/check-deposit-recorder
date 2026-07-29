@@ -12,33 +12,10 @@ import { toast, esc } from './util.js';
 import { navigate } from './app.js';
 
 export async function renderSettings(view) {
-  const [defaults, dbPath] = await Promise.all([
-    window.api.getDefaults(),
-    window.api.getDbPath(),
-  ]);
+  const dbPath = await window.api.getDbPath();
 
   view.innerHTML = `
     <div class="view-head"><h2>Settings</h2></div>
-
-    <section class="card">
-      <h3>Default deposit values</h3>
-      <p class="muted">Pre-filled when you start a new deposit.</p>
-      <div class="field-grid">
-        <label class="field">
-          <span>Bank</span>
-          <input type="text" id="s-bank" placeholder="RCBC" />
-        </label>
-        <label class="field">
-          <span>Account name</span>
-          <input type="text" id="s-acctname" />
-        </label>
-        <label class="field">
-          <span>Account number</span>
-          <input type="text" id="s-acctno" />
-        </label>
-      </div>
-      <div class="calib-actions"><button class="btn" id="s-save-defaults">Save defaults</button></div>
-    </section>
 
     <section class="card">
       <h3>Database</h3>
@@ -70,20 +47,6 @@ export async function renderSettings(view) {
     </section>`;
 
   const $ = (s) => view.querySelector(s);
-
-  // Populate defaults.
-  $('#s-bank').value = defaults.bank || '';
-  $('#s-acctname').value = defaults.account_name || '';
-  $('#s-acctno').value = defaults.account_number || '';
-
-  $('#s-save-defaults').addEventListener('click', async () => {
-    await window.api.saveDefaults({
-      bank: $('#s-bank').value,
-      account_name: $('#s-acctname').value,
-      account_number: $('#s-acctno').value,
-    });
-    toast('Default values saved.', 'success');
-  });
 
   $('#s-openfolder').addEventListener('click', () => window.api.openDbFolder());
 
