@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+
+# Generated verification artifacts (the reference/*.js scripts are kept)
+reference/*.png
+reference/*.pdf

@@ -1,0 +1,43 @@
+{
+  "name": "check-deposit-recorder",
+  "version": "1.0.0",
+  "description": "Offline desktop app to record and reprint bank check/cash deposits (RCBC pickup slip).",
+  "main": "main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.victoria.checkdeposit",
+    "productName": "Check Deposit Recorder",
+    "files": [
+      "**/*",
+      "!reference/${/*}",
+      "!**/*.md"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "@electron/rebuild": "^3.7.1"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0"
+  }
+}

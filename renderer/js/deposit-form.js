@@ -1,0 +1,272 @@
+'use strict';
+
+/**
+ * deposit-form.js — the New / Edit Deposit screen.
+ *
+ * The entry area mirrors the RCBC slip one-to-one: a SINGLE table with CASH on
+ * the left and CHECKS on the right, each split into two columns of 12 (lines
+ * 1–12 and 13–24). Every cell is just an amount box — you type numbers, nothing
+ * else. Line numbers are fixed labels. Totals update live.
+ *
+ * Each row holds four amount inputs in this order: cash 1–12, cash 13–24,
+ * check 1–12, check 13–24 — so pressing Enter jumps straight down a column.
+ */
+
+import { peso, money, todayISO, toast } from './util.js';
+import { openPrintPreview } from './print.js';
+
+const ROWS = 12; // 12 rows × (2 cash + 2 check columns) = 24 cash + 24 check lines
+
+let editingId = null; // null = creating; otherwise editing this deposit id
+
+/**
+ * Render the deposit form into `container`.
+ * Pass { deposit } (as returned by getDeposit) to open in edit mode.
+ */
+export function renderDepositForm(container, opts = {}) {
+  const deposit = opts.deposit || null;
+  editingId = deposit ? deposit.id : null;
+
+  container.innerHTML = `
+    <div class="view-head">
+      <h2>${editingId ? 'Edit deposit #' + editingId : 'New deposit'}</h2>
+    </div>
+
+    <section class="card">
+      <div class="field-grid">
+        <label class="field">
+          <span>Deposit date <em>*</em></span>
+          <input type="date" id="f-date" />
+        </label>
+        <label class="field">
+          <span>Bank</span>
+          <input type="text" id="f-bank" placeholder="RCBC" />
+        </label>
+        <label class="field">
+          <span>Account name</span>
+          <input type="text" id="f-acctname" />
+        </label>
+        <label class="field">
+          <span>Account number</span>
+          <input type="text" id="f-acctno" />
+        </label>
+        <label class="field">
+          <span>Reference no</span>
+          <input type="text" id="f-ref" placeholder="pickup / slip reference" />
+        </label>
+        <label class="field field-wide">
+          <span>Notes</span>
+          <input type="text" id="f-notes" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <table class="slip-table">
+        <thead>
+          <tr class="slip-sections">
+            <th colspan="4">CASH</th>
+            <th class="slip-gap"></th>
+            <th colspan="4">CHECKS</th>
+          </tr>
+          <tr class="slip-cols">
+            <th class="lineno">#</th><th>Amount</th>
+            <th class="lineno">#</th><th>Amount</th>
+            <th class="slip-gap"></th>
+            <th class="lineno">#</th><th>Amount</th>
+            <th class="lineno">#</th><th>Amount</th>
+          </tr>
+        </thead>
+        <tbody id="slip-body"></tbody>
+        <tfoot>
+          <tr class="slip-totals">
+            <td colspan="4">Cash total: <strong id="cash-total">₱ 0.00</strong></td>
+            <td class="slip-gap"></td>
+            <td colspan="4">Checks total: <strong id="check-total">₱ 0.00</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </section>
+
+    <div class="totals-bar">
+      <div class="totals-nums">
+        <span>Cash <strong id="bar-cash">₱ 0.00</strong></span>
+        <span>Checks <strong id="bar-check">₱ 0.00</strong></span>
+        <span class="grand">Grand total <strong id="bar-grand">₱ 0.00</strong></span>
+      </div>
+      <div class="totals-actions">
+        <button class="btn btn-ghost" id="btn-clear">Clear</button>
+        <button class="btn btn-ghost" id="btn-print">Preview / Print</button>
+        <button class="btn" id="btn-save">${editingId ? 'Save changes' : 'Save deposit'}</button>
+      </div>
+    </div>
+  `;
+
+  const body = container.querySelector('#slip-body');
+  const amt = (section, line) =>
+    `<td class="amt"><input type="number" class="amount-input" step="0.01" min="0"
+       inputmode="decimal" placeholder="0.00" data-section="${section}" data-line="${line}" /></td>`;
+
+  // 12 rows; each row: [cash L, cash R, gap, check L, check R].
+  let rowsHtml = '';
+  for (let r = 1; r <= ROWS; r++) {
+    rowsHtml += `<tr>
+      <td class="lineno">${r}</td>${amt('CASH', r)}
+      <td class="lineno">${r + ROWS}</td>${amt('CASH', r + ROWS)}
+      <td class="slip-gap"></td>
+      <td class="lineno">${r}</td>${amt('CHECK', r)}
+      <td class="lineno">${r + ROWS}</td>${amt('CHECK', r + ROWS)}
+    </tr>`;
+  }
+  body.innerHTML = rowsHtml;
+
+  // ---- header defaults / edit population ----
+  container.querySelector('#f-date').value = deposit ? deposit.deposit_date : todayISO();
+  container.querySelector('#f-bank').value = deposit ? (deposit.bank || 'RCBC') : 'RCBC';
+  container.querySelector('#f-acctname').value = deposit?.account_name || '';
+  container.querySelector('#f-acctno').value = deposit?.account_number || '';
+  container.querySelector('#f-ref').value = deposit?.reference_no || '';
+  container.querySelector('#f-notes').value = deposit?.notes || '';
+
+  if (!deposit) {
+    // For a NEW deposit, pre-fill the header from the saved default values.
+    window.api.getDefaults().then((d) => {
+      if (d.bank) container.querySelector('#f-bank').value = d.bank;
+      container.querySelector('#f-acctname').value = d.account_name || '';
+      container.querySelector('#f-acctno').value = d.account_number || '';
+    });
+  } else {
+    // Edit mode: drop each item's amount into its matching cell by section+line.
+    for (const it of deposit.items) {
+      const input = body.querySelector(
+        `.amount-input[data-section="${it.section}"][data-line="${it.line_no}"]`
+      );
+      if (input) input.value = it.amount;
+    }
+  }
+
+  recomputeTotals(container);
+
+  // ---- wiring ----
+  container.querySelector('#btn-clear').addEventListener('click', () => {
+    if (confirm('Clear the form and start a new deposit?')) renderDepositForm(container);
+  });
+  container.querySelector('#btn-save').addEventListener('click', () => save(container));
+  container.querySelector('#btn-print').addEventListener('click', () => previewCurrent(container));
+
+  // Live totals + clear invalid highlight on edit.
+  container.addEventListener('input', (e) => {
+    if (e.target.classList.contains('amount-input')) {
+      e.target.classList.remove('invalid');
+      recomputeTotals(container);
+    }
+  });
+
+  // Enter jumps to the same column on the next row (4 inputs per row).
+  const inputs = [...body.querySelectorAll('.amount-input')];
+  body.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !e.target.classList.contains('amount-input')) return;
+    e.preventDefault();
+    const i = inputs.indexOf(e.target);
+    const next = inputs[i + 4];
+    if (next) next.focus();
+  });
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+function sumSection(container, section) {
+  let sum = 0;
+  for (const input of container.querySelectorAll(`.amount-input[data-section="${section}"]`)) {
+    const v = parseFloat(input.value);
+    if (Number.isFinite(v) && v > 0) sum += v;
+  }
+  return money(sum);
+}
+
+function recomputeTotals(container) {
+  const cash = sumSection(container, 'CASH');
+  const check = sumSection(container, 'CHECK');
+  const grand = money(cash + check);
+
+  container.querySelector('#cash-total').textContent = peso(cash);
+  container.querySelector('#check-total').textContent = peso(check);
+  container.querySelector('#bar-cash').textContent = peso(cash);
+  container.querySelector('#bar-check').textContent = peso(check);
+  container.querySelector('#bar-grand').textContent = peso(grand);
+}
+
+// Gather non-empty amounts as items, validating each. Returns { items, hadError }.
+function collectItems(container) {
+  const items = [];
+  let hadError = false;
+  for (const input of container.querySelectorAll('.amount-input')) {
+    const raw = input.value.trim();
+    if (raw === '') continue;
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v) || v <= 0) {
+      input.classList.add('invalid');
+      hadError = true;
+      continue;
+    }
+    items.push({
+      section: input.dataset.section,
+      line_no: Number(input.dataset.line),
+      amount: money(v),
+    });
+  }
+  return { items, hadError };
+}
+
+function readHeader(container) {
+  return {
+    deposit_date: container.querySelector('#f-date').value,
+    bank: container.querySelector('#f-bank').value.trim() || 'RCBC',
+    account_name: container.querySelector('#f-acctname').value.trim() || null,
+    account_number: container.querySelector('#f-acctno').value.trim() || null,
+    reference_no: container.querySelector('#f-ref').value.trim() || null,
+    notes: container.querySelector('#f-notes').value.trim() || null,
+  };
+}
+
+// Build a deposit-like object from the current form (no save) and open preview.
+function previewCurrent(container) {
+  const { items, hadError } = collectItems(container);
+  if (hadError) { toast('Fix the highlighted amounts before printing.', 'error'); return; }
+  if (items.length === 0) { toast('Add at least one amount before printing.', 'warn'); return; }
+  const h = readHeader(container);
+  openPrintPreview({ deposit_date: h.deposit_date, bank: h.bank, reference_no: h.reference_no, items });
+}
+
+async function save(container) {
+  const date = container.querySelector('#f-date').value;
+  if (!date) {
+    toast('Deposit date is required.', 'error');
+    container.querySelector('#f-date').focus();
+    return;
+  }
+
+  const { items, hadError } = collectItems(container);
+  if (hadError) {
+    toast('Some amounts are not valid positive numbers (highlighted).', 'error');
+    return;
+  }
+  if (items.length === 0) {
+    toast('Enter at least one cash or check amount before saving.', 'error');
+    return;
+  }
+
+  const header = readHeader(container);
+  try {
+    if (editingId) {
+      await window.api.updateDeposit(editingId, header, items);
+      toast(`Saved changes to deposit #${editingId}.`, 'success');
+    } else {
+      const id = await window.api.createDeposit(header, items);
+      toast(`Saved deposit #${id} (${items.length} lines).`, 'success');
+      renderDepositForm(container); // fresh form for the next entry
+    }
+  } catch (err) {
+    toast('Save failed: ' + err.message, 'error');
+  }
+}
