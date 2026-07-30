@@ -83,7 +83,6 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    show: false, // reveal maximized once ready, to avoid a small-window flash
     title: 'Check Deposit Recorder',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
@@ -94,12 +93,10 @@ function createWindow() {
   });
 
   // Open maximized — a full window (title bar + minimize/maximize/close stay),
-  // not kiosk/fullscreen. The 1200×900 above is the size when un-maximized.
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
-    mainWindow.show();
-  });
-
+  // not kiosk/fullscreen. Create it visible and maximize directly; relying on
+  // show:false + 'ready-to-show' left the window hidden on some setups.
+  mainWindow.maximize();
+  mainWindow.show();
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
