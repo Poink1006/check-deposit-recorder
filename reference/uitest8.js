@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
     btn:document.getElementById('btn-save').textContent,
     hint:document.getElementById('date-hint').className,
     grand:document.getElementById('bar-grand').textContent })`);
-  ck('existing amounts loaded on date select', loaded.c1==='20000' && loaded.c2==='30000');
+  ck('existing amounts loaded on date select', loaded.c1==='20,000.00' && loaded.c2==='30,000.00');
   ck('save button shows "Save changes"', loaded.btn==='Save changes');
   ck('hint marks existing', /existing/.test(loaded.hint));
   ck('grand total shows 50,000', /50,000\.00/.test(loaded.grand));

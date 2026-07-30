@@ -90,7 +90,7 @@ export function renderDepositForm(container, opts = {}) {
   const body = container.querySelector('#slip-body');
   const dateEl = container.querySelector('#f-date');
   const amt = (section, line) =>
-    `<td class="amt"><input type="number" class="amount-input" step="0.01" min="0"
+    `<td class="amt"><input type="text" class="amount-input"
        inputmode="decimal" data-section="${section}" data-line="${line}" /></td>`;
 
   // 12 rows; each row: [cash L, cash R, gap, check L, check R].
@@ -116,7 +116,7 @@ export function renderDepositForm(container, opts = {}) {
         const el = body.querySelector(
           `.amount-input[data-section="${it.section}"][data-line="${it.line_no}"]`
         );
-        if (el) el.value = it.amount;
+        if (el) el.value = formatAmount(it.amount);
       }
     }
   }
@@ -164,6 +164,15 @@ export function renderDepositForm(container, opts = {}) {
     if (e.target.classList.contains('amount-input')) {
       e.target.classList.remove('invalid');
       formDirty = true;
+      recomputeTotals(container);
+    }
+  });
+
+  // Reformat a cell with thousands separators when you leave it (also on
+  // Enter/Arrow, which move focus and so blur the current cell).
+  container.addEventListener('focusout', (e) => {
+    if (e.target.classList.contains('amount-input')) {
+      e.target.value = formatAmount(e.target.value);
       recomputeTotals(container);
     }
   });
@@ -219,10 +228,27 @@ export function renderDepositForm(container, opts = {}) {
 
 // ---- helpers (operate on the container, no closure state) -------------------
 
+// Parse a possibly comma-grouped amount string to a number.
+function parseAmount(v) {
+  return parseFloat(String(v).replace(/,/g, ''));
+}
+
+// Format a number/string as grouped 2-decimal (e.g. 20000 -> "20,000.00").
+// Blank and 0 become empty; anything unparseable is left as typed (to be
+// flagged on save).
+function formatAmount(v) {
+  const raw = String(v).trim();
+  if (raw === '') return '';
+  const n = parseAmount(raw);
+  if (!Number.isFinite(n)) return raw;
+  if (n === 0) return '';
+  return n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function sumSection(container, section) {
   let sum = 0;
   for (const input of container.querySelectorAll(`.amount-input[data-section="${section}"]`)) {
-    const v = parseFloat(input.value);
+    const v = parseAmount(input.value);
     if (Number.isFinite(v) && v > 0) sum += v;
   }
   return money(sum);
@@ -247,7 +273,7 @@ function collectItems(container) {
   for (const input of container.querySelectorAll('.amount-input')) {
     const raw = input.value.trim();
     if (raw === '') continue;
-    const v = parseFloat(raw);
+    const v = parseAmount(raw);
     if (!Number.isFinite(v) || v <= 0) {
       input.classList.add('invalid');
       hadError = true;
