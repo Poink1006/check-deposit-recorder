@@ -38,10 +38,15 @@ contextBridge.exposeInMainWorld('api', {
   getDefaults: () => ipcRenderer.invoke('settings:getDefaults'),
   saveDefaults: (d) => ipcRenderer.invoke('settings:saveDefaults', d),
 
-  // Supabase sync config.
-  getSyncConfig: () => ipcRenderer.invoke('sync:getConfig'),
-  saveSyncConfig: (cfg) => ipcRenderer.invoke('sync:saveConfig', cfg),
-  testSync: () => ipcRenderer.invoke('sync:test'),
+  // Shared-account auth (one-time login per computer).
+  authStatus: () => ipcRenderer.invoke('auth:status'),
+  signIn: (email, password) => ipcRenderer.invoke('auth:signin', email, password),
+  signOut: () => ipcRenderer.invoke('auth:signout'),
+  onSignedOut: (cb) => {
+    const h = () => cb();
+    ipcRenderer.on('auth:signedout', h);
+    return () => ipcRenderer.removeListener('auth:signedout', h);
+  },
 
   // Supabase sync runtime.
   syncNow: () => ipcRenderer.invoke('sync:now'),

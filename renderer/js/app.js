@@ -13,6 +13,7 @@ import { renderHistory } from './history.js';
 import { renderSettings } from './settings.js';
 import { initUpdateBanner } from './update-banner.js';
 import { initSyncStatus } from './sync-status.js';
+import { showLoginGate } from './login.js';
 
 const view = document.getElementById('view');
 
@@ -73,6 +74,13 @@ initUpdateBanner();
 initSyncStatus();
 if (window.api.onSyncChanged) {
   window.api.onSyncChanged(() => { if (currentView === 'history') navigate('history'); });
+}
+
+// Require the shared-account login on first run; the session is remembered
+// afterwards. Signing out (from Settings) brings the gate back.
+if (window.api.authStatus) {
+  window.api.authStatus().then((st) => { if (!st.signedIn) showLoginGate(() => navigate(currentView)); });
+  window.api.onSignedOut(() => showLoginGate(() => navigate(currentView)));
 }
 
 // Show the running app version in the header (handy for confirming updates).

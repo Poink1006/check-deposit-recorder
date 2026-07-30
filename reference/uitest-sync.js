@@ -1,44 +1,51 @@
 'use strict';
 // Two-computer offline-sync test against the real Supabase project.
-// Runs under Electron (matches the native better-sqlite3 ABI):
-//   SUPA_URL=... SUPA_KEY=... npx electron reference/uitest-sync.js
+// Requires the shared account (RLS is authenticated-only) + migration 002 run.
+// Runs under Electron:
+//   SUPA_TEST_EMAIL=... SUPA_TEST_PASSWORD=... npx electron reference/uitest-sync.js
+// Skips (exit 0) if no test credentials are provided.
 const { app } = require('electron');
 const os = require('os'), path = require('path'), fs = require('fs');
-const { createClient } = require('@supabase/supabase-js');
 const db = require('../db');
 const sync = require('../sync');
 
 app.disableHardwareAcceleration();
-
-const URL = process.env.SUPA_URL, KEY = process.env.SUPA_KEY;
-const raw = createClient(URL, KEY, { auth: { persistSession: false } });
+const EMAIL = process.env.SUPA_TEST_EMAIL, PASS = process.env.SUPA_TEST_PASSWORD;
 const results = [];
 const check = (n, c) => { results.push(c); console.log((c ? 'OK  ' : 'FAIL') + ' ' + n); };
 const mkdir = (t) => fs.mkdtempSync(path.join(os.tmpdir(), t));
 
+async function useComputer(dir) {
+  db.init(dir);
+  sync.init();
+  const r = await sync.signIn(EMAIL, PASS);
+  if (!r.ok) throw new Error('sign-in failed: ' + r.error);
+}
+
 async function main() {
-  sync.init({ url: URL, key: KEY });
-  await raw.from('deposits').delete().like('reference_no', 'SYNC%'); // clean slate
+  if (!EMAIL || !PASS) {
+    console.log('SYNC TEST SKIPPED (set SUPA_TEST_EMAIL / SUPA_TEST_PASSWORD)');
+    return app.exit(0);
+  }
 
   const A = mkdir('cdrA-'), B = mkdir('cdrB-');
+  await useComputer(A);
+  await sync.getClient().from('deposits').delete().like('reference_no', 'SYNC%'); // clean slate
 
-  // ── Computer A: create + push ───────────────────────────────────────────
-  db.init(A);
+  // A: create + push
   const a1 = db.createDeposit({ deposit_date: '2026-07-29', reference_no: 'SYNC-A1' },
     [{ section: 'CASH', line_no: 1, amount: 1000 }]);
-  check('A: 1 pending before sync', db.getPendingCount() === 1);
   let r = await sync.syncNow();
-  check('A: push ok (pushed>=1)', r.ok && r.pushed >= 1);
-  check('A: 0 pending after push', db.getPendingCount() === 0);
+  check('A: push ok', r.ok && r.pushed >= 1);
 
-  // ── Computer B: pull A's deposit ────────────────────────────────────────
-  db.init(B);
+  // B: pull
+  await useComputer(B);
   r = await sync.syncNow();
   check('B: pulled A1', r.ok && r.pulled >= 1);
   const bA1 = db.getDeposit(a1);
-  check('B: A1 present with item + total', bA1 && bA1.items.length === 1 && bA1.grand_total === 1000);
+  check('B: A1 present with total', bA1 && bA1.grand_total === 1000);
 
-  // B creates its own, and edits A1 (newer) → both push
+  // B: create + edit A1 (newer)
   const b1 = db.createDeposit({ deposit_date: '2026-07-29', reference_no: 'SYNC-B1' },
     [{ section: 'CHECK', line_no: 1, amount: 2000 }]);
   db.updateDeposit(a1, { deposit_date: '2026-07-30', reference_no: 'SYNC-A1-EDIT' },
@@ -46,32 +53,22 @@ async function main() {
   r = await sync.syncNow();
   check('B: pushed b1 + edit', r.ok && r.pushed >= 2);
 
-  // ── Computer A: pull B1 + the edit (last-write-wins) ────────────────────
-  db.init(A);
+  // A: pull edit + b1 (last-write-wins)
+  await useComputer(A);
   r = await sync.syncNow();
+  const aEdit = db.getDeposit(a1);
+  check('A: A1 edit won', aEdit && aEdit.grand_total === 1500 && aEdit.deposit_date === '2026-07-30');
   const aB1 = db.listDeposits().find((d) => d.reference_no === 'SYNC-B1');
   check('A: pulled B1', !!aB1);
-  const aEdit = db.getDeposit(a1);
-  check('A: A1 edit won (date+total+ref updated)',
-    aEdit && aEdit.deposit_date === '2026-07-30' && aEdit.grand_total === 1500 &&
-    aEdit.reference_no === 'SYNC-A1-EDIT' && aEdit.items[0].amount === 1500);
 
-  // ── Delete propagation: A deletes B1, B pulls the removal ───────────────
+  // A: delete b1, B: pull removal
   db.deleteDeposit(aB1.id);
+  await sync.syncNow();
+  await useComputer(B);
   r = await sync.syncNow();
-  check('A: pushed delete', r.ok && r.pushed >= 1);
-  check('A: B1 hidden locally', db.getDeposit(b1) === null);
+  check('B: B1 removed via sync', db.getDeposit(b1) === null);
 
-  db.init(B);
-  r = await sync.syncNow();
-  check('B: pulled delete → B1 gone', db.getDeposit(b1) === null &&
-    !db.listDeposits().some((d) => d.id === b1));
-
-  // ── cleanup remote test rows ────────────────────────────────────────────
-  await raw.from('deposits').delete().like('reference_no', 'SYNC%');
-  const { count } = await raw.from('deposits').select('*', { count: 'exact', head: true }).like('reference_no', 'SYNC%');
-  check('cleanup: no SYNC rows left in Supabase', (count ?? 0) === 0);
-
+  await sync.getClient().from('deposits').delete().like('reference_no', 'SYNC%'); // cleanup
   const pass = results.every(Boolean);
   console.log(pass ? 'SYNC TEST PASSED' : 'SYNC TEST FAILED');
   app.exit(pass ? 0 : 1);

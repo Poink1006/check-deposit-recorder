@@ -18,7 +18,7 @@ export function initSyncStatus() {
   document.querySelector('.app-header').appendChild(tag);
 
   const render = (st) => {
-    if (!st || !st.configured) { tag.style.display = 'none'; return; }
+    if (!st) { tag.style.display = 'none'; return; }
     tag.style.display = '';
     let label = 'Synced';
     let cls = 'ok';

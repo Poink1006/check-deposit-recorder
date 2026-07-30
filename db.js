@@ -192,6 +192,10 @@ function setSetting(key, value) {
   return value;
 }
 
+function deleteSetting(key) {
+  db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+}
+
 /** Calibration merged over defaults, so missing/older keys still work. */
 function getCalibration() {
   return { ...DEFAULT_CALIBRATION, ...(getSetting('calibration') || {}) };
@@ -678,6 +682,7 @@ module.exports = {
   duplicateDeposit,
   getSetting,
   setSetting,
+  deleteSetting,
   getCalibration,
   saveCalibration,
   DEFAULT_CALIBRATION,

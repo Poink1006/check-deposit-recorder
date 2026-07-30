@@ -18,7 +18,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:getDefaults', () => db.getDefaults());
   ipcMain.handle('settings:saveDefaults', (_e, d) => db.saveDefaults(d));
   ipcMain.handle('db:getPath', () => db.getDbPath());
-  ipcMain.handle('sync:getConfig', () => db.getSyncConfig());
+  ipcMain.handle('auth:status', () => ({ signedIn: true, email: 'office@example.com' }));
 
   // --- defaults ---
   db.saveDefaults({ bank: 'RCBC', account_name: 'Victoria Ent.', account_number: '1234567890' });
@@ -80,8 +80,8 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript(`document.querySelector('.nav-btn[data-view="settings"]').click()`);
   await win.webContents.executeJavaScript(`(async () => { for (let k=0;k<40;k++){ if(document.querySelector('#s-dbpath')) return; await new Promise(r=>setTimeout(r,50)); } })()`);
   await win.webContents.executeJavaScript(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
-  const uiOk = await win.webContents.executeJavaScript(`!!document.querySelector('#s-dbpath') && !!document.querySelector('#y-url')`);
-  check('Settings screen renders (db path + sync fields)', uiOk);
+  const uiOk = await win.webContents.executeJavaScript(`!!document.querySelector('#s-dbpath') && !!document.querySelector('#y-sync')`);
+  check('Settings screen renders (db path + sync section)', uiOk);
   const img = await win.webContents.capturePage();
   fs.writeFileSync(path.join(__dirname, 'phase5-settings.png'), img.toPNG());
   console.log('Screenshot: phase5-settings.png');

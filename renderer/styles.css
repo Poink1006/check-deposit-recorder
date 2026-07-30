@@ -297,6 +297,33 @@ input.invalid { border-color: var(--danger); background: #fdecec; }
 .toast-warn { background: var(--warn); }
 .toast-error { background: var(--danger); }
 
+/* ---- login gate ---- */
+.login-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.login-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 28px 30px;
+  width: min(380px, 92vw);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.login-card h2 { margin: 0; font-size: 19px; }
+.login-card .muted { margin: 0 0 6px; font-size: 13px; }
+.login-card .field { gap: 4px; }
+.login-card .btn { margin-top: 6px; }
+.login-err { color: var(--danger); font-size: 13px; min-height: 16px; margin: 2px 0 0; }
+
 /* ---- modal (print preview) ---- */
 .modal-backdrop {
   position: fixed;

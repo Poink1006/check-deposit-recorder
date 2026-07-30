@@ -12,34 +12,23 @@ import { toast, esc } from './util.js';
 import { navigate } from './app.js';
 
 export async function renderSettings(view) {
-  const [dbPath, syncCfg] = await Promise.all([
+  const [dbPath, auth] = await Promise.all([
     window.api.getDbPath(),
-    window.api.getSyncConfig(),
+    window.api.authStatus(),
   ]);
 
   view.innerHTML = `
     <div class="view-head"><h2>Settings</h2></div>
 
     <section class="card">
-      <h3>Sync (Supabase)</h3>
+      <h3>Sync</h3>
       <p class="muted">
-        Connect this computer to your shared office database so deposits sync
-        across all machines. Paste the Project URL and the publishable
-        (<code>sb_publishable_…</code>) key. Enter this once per computer.
+        This computer syncs deposits with the shared office database while
+        signed in. Signed in as <strong>${esc(auth.email || '—')}</strong>.
       </p>
-      <div class="field-grid">
-        <label class="field field-wide">
-          <span>Project URL</span>
-          <input type="text" id="y-url" placeholder="https://xxxx.supabase.co" />
-        </label>
-        <label class="field field-wide">
-          <span>Publishable key</span>
-          <input type="password" id="y-key" placeholder="sb_publishable_…" />
-        </label>
-      </div>
       <div class="calib-actions">
-        <button class="btn" id="y-save">Save &amp; test connection</button>
         <button class="btn btn-ghost" id="y-sync">Sync now</button>
+        <button class="btn btn-ghost" id="y-signout">Sign out</button>
         <span class="muted" id="y-status"></span>
       </div>
     </section>
@@ -75,21 +64,10 @@ export async function renderSettings(view) {
 
   const $ = (s) => view.querySelector(s);
 
-  // --- Sync config ---
-  $('#y-url').value = syncCfg.url || '';
-  $('#y-key').value = syncCfg.key || '';
-  $('#y-save').addEventListener('click', async () => {
-    const status = $('#y-status');
-    status.textContent = 'Saving…';
-    await window.api.saveSyncConfig({ url: $('#y-url').value, key: $('#y-key').value });
-    const res = await window.api.testSync();
-    if (res.ok) {
-      status.textContent = `Connected ✓ (${res.count} deposit(s) in the shared database).`;
-      toast('Sync connected.', 'success');
-    } else {
-      status.textContent = 'Connection failed: ' + res.error;
-      toast('Sync connection failed.', 'error');
-    }
+  // --- Sync / account ---
+  $('#y-signout').addEventListener('click', async () => {
+    if (!confirm('Sign out on this computer? You will need the shared login to use it again.')) return;
+    await window.api.signOut(); // main sends auth:signedout → app shows the login gate
   });
 
   $('#y-sync').addEventListener('click', async () => {

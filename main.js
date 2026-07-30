@@ -158,16 +158,18 @@ ipcMain.handle('settings:saveDefaults', (_evt, d) => db.saveDefaults(d));
 
 // ---- IPC: Supabase sync -----------------------------------------------------
 
-ipcMain.handle('sync:getConfig', () => db.getSyncConfig());
-ipcMain.handle('sync:saveConfig', (_evt, cfg) => {
-  const saved = db.saveSyncConfig(cfg);
-  sync.init(saved);     // re-create the client with the new config
-  sync.scheduleSoon();  // sync promptly now that it's connected
-  return saved;
-});
-ipcMain.handle('sync:test', () => sync.testConnection());
 ipcMain.handle('sync:now', () => sync.syncNow());
 ipcMain.handle('sync:status', () => sync.status());
+
+// ---- IPC: shared-account auth ----------------------------------------------
+
+ipcMain.handle('auth:status', () => sync.authStatus());
+ipcMain.handle('auth:signin', (_evt, email, password) => sync.signIn(email, password));
+ipcMain.handle('auth:signout', async () => {
+  const r = await sync.signOut();
+  if (mainWindow) mainWindow.webContents.send('auth:signedout');
+  return r;
+});
 
 // ---- IPC: backup / restore / CSV -------------------------------------------
 
@@ -263,7 +265,7 @@ ipcMain.handle('print:pdf', async (_evt, html, suggestedName) => {
 app.whenReady().then(() => {
   // Open/create the database before any window can query it.
   db.init(app.getPath('userData'));
-  sync.init(db.getSyncConfig()); // set up the Supabase client if configured
+  sync.init(); // Supabase client from the embedded config
 
   // After each sync, push the status to the renderer; if the pull brought new
   // data, tell it to refresh the current view.
