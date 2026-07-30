@@ -124,6 +124,8 @@ ipcMain.handle('db:updateDeposit', (_evt, id, header, items) => {
 
 ipcMain.handle('db:getDeposit', (_evt, id) => db.getDeposit(id));
 
+ipcMain.handle('db:getDepositByDate', (_evt, date) => db.getDepositByDate(date));
+
 ipcMain.handle('db:listDeposits', (_evt, filters) => db.listDeposits(filters));
 
 ipcMain.handle('db:deleteDeposit', (_evt, id) => {

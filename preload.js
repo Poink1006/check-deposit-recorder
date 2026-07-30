@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   updateDeposit: (id, header, items) =>
     ipcRenderer.invoke('db:updateDeposit', id, header, items),
   getDeposit: (id) => ipcRenderer.invoke('db:getDeposit', id),
+  getDepositByDate: (date) => ipcRenderer.invoke('db:getDepositByDate', date),
   listDeposits: (filters) => ipcRenderer.invoke('db:listDeposits', filters),
   deleteDeposit: (id) => ipcRenderer.invoke('db:deleteDeposit', id),
   duplicateDeposit: (id, newDate) =>

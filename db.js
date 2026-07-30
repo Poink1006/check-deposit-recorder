@@ -579,6 +579,15 @@ function getDeposit(id) {
   return { ...deposit, items };
 }
 
+/** The newest non-deleted deposit for a given date (with items), or null. */
+function getDepositByDate(date) {
+  const row = db
+    .prepare(`SELECT id FROM deposits WHERE deposit_date = ? AND deleted_at IS NULL
+              ORDER BY created_at DESC LIMIT 1`)
+    .get(date);
+  return row ? getDeposit(row.id) : null;
+}
+
 /**
  * List deposits (newest first) with an item count.
  * filters = { from, to, search } — all optional:
@@ -663,6 +672,7 @@ module.exports = {
   createDeposit,
   updateDeposit,
   getDeposit,
+  getDepositByDate,
   listDeposits,
   deleteDeposit,
   duplicateDeposit,

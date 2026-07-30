@@ -3,13 +3,14 @@
 /**
  * deposit-form.js — the New / Edit Deposit screen.
  *
- * The entry area mirrors the RCBC slip one-to-one: a SINGLE table with CASH on
- * the left and CHECKS on the right, each split into two columns of 12 (lines
- * 1–12 and 13–24). Every cell is just an amount box — you type numbers, nothing
- * else. Line numbers are fixed labels. Totals update live.
+ * The screen is DATE-DRIVEN: pick a date and it loads the saved deposit for
+ * that date (if any) so you can view/edit it in place; saving updates it rather
+ * than creating a duplicate. If no deposit exists for the date, it's a blank
+ * form that saves as new.
  *
- * Each row holds four amount inputs in this order: cash 1–12, cash 13–24,
- * check 1–12, check 13–24 — so pressing Enter jumps straight down a column.
+ * The entry area mirrors the RCBC slip: a single table with CASH on the left
+ * and CHECKS on the right, each split into two columns of 12 (lines 1–12 and
+ * 13–24). Every cell is just an amount box.
  */
 
 import { peso, money, todayISO, toast } from './util.js';
@@ -17,21 +18,22 @@ import { openPrintPreview } from './print.js';
 
 const ROWS = 12; // 12 rows × (2 cash + 2 check columns) = 24 cash + 24 check lines
 
-let editingId = null;       // null = creating; otherwise editing this deposit id
-let editingDeposit = null;  // the record being edited (to preserve hidden header fields)
+let editingId = null;      // id of the deposit currently loaded, or null (new)
+let editingDeposit = null; // the loaded record (to preserve hidden header fields)
 
 /**
  * Render the deposit form into `container`.
- * Pass { deposit } (as returned by getDeposit) to open in edit mode.
+ * Pass { deposit } to open a specific record (e.g. from History → Edit);
+ * otherwise it opens on today and loads today's deposit if one exists.
  */
 export function renderDepositForm(container, opts = {}) {
-  const deposit = opts.deposit || null;
-  editingId = deposit ? deposit.id : null;
-  editingDeposit = deposit;
+  let initialDeposit = opts.deposit || null;
+  let currentDate = initialDeposit ? initialDeposit.deposit_date : todayISO();
+  let formDirty = false; // any unsaved amount edits since the last load/save
 
   container.innerHTML = `
     <div class="view-head">
-      <h2>${editingId ? 'Edit deposit' : 'New deposit'}</h2>
+      <h2>Deposit</h2>
     </div>
 
     <section class="card">
@@ -41,6 +43,7 @@ export function renderDepositForm(container, opts = {}) {
           <input type="date" id="f-date" />
         </label>
       </div>
+      <p class="date-hint" id="date-hint"></p>
     </section>
 
     <section class="card">
@@ -79,12 +82,13 @@ export function renderDepositForm(container, opts = {}) {
       <div class="totals-actions">
         <button class="btn btn-ghost" id="btn-clear">Clear</button>
         <button class="btn btn-ghost" id="btn-print">Preview / Print</button>
-        <button class="btn" id="btn-save">${editingId ? 'Save changes' : 'Save deposit'}</button>
+        <button class="btn" id="btn-save">Save deposit</button>
       </div>
     </div>
   `;
 
   const body = container.querySelector('#slip-body');
+  const dateEl = container.querySelector('#f-date');
   const amt = (section, line) =>
     `<td class="amt"><input type="number" class="amount-input" step="0.01" min="0"
        inputmode="decimal" data-section="${section}" data-line="${line}" /></td>`;
@@ -102,40 +106,69 @@ export function renderDepositForm(container, opts = {}) {
   }
   body.innerHTML = rowsHtml;
 
-  // ---- date + edit population ----
-  container.querySelector('#f-date').value = deposit ? deposit.deposit_date : todayISO();
+  const inputs = [...body.querySelectorAll('.amount-input')];
 
-  if (deposit) {
-    // Edit mode: drop each item's amount into its matching cell by section+line.
-    for (const it of deposit.items) {
-      const input = body.querySelector(
-        `.amount-input[data-section="${it.section}"][data-line="${it.line_no}"]`
-      );
-      if (input) input.value = it.amount;
+  // Fill (or clear) the amount cells from a deposit record.
+  function fillFrom(dep) {
+    inputs.forEach((i) => { i.value = ''; i.classList.remove('invalid'); });
+    if (dep) {
+      for (const it of dep.items) {
+        const el = body.querySelector(
+          `.amount-input[data-section="${it.section}"][data-line="${it.line_no}"]`
+        );
+        if (el) el.value = it.amount;
+      }
     }
   }
 
-  recomputeTotals(container);
+  // Reflect whether we're editing an existing deposit or starting a new one.
+  function updateModeUI() {
+    container.querySelector('#btn-save').textContent = editingId ? 'Save changes' : 'Save deposit';
+    const hint = container.querySelector('#date-hint');
+    hint.textContent = editingId
+      ? 'Showing the saved deposit for this date — your edits will update it.'
+      : 'No deposit for this date yet — this will be saved as new.';
+    hint.className = 'date-hint ' + (editingId ? 'existing' : 'fresh');
+  }
+
+  // Load the deposit for a date into the form (or blank it if none).
+  async function loadForDate(date) {
+    let dep = null;
+    if (initialDeposit && initialDeposit.deposit_date === date) dep = initialDeposit;
+    else dep = await window.api.getDepositByDate(date);
+    initialDeposit = null; // only honoured on the first load
+
+    editingDeposit = dep;
+    editingId = dep ? dep.id : null;
+    fillFrom(dep);
+    formDirty = false;
+    currentDate = date;
+    updateModeUI();
+    recomputeTotals(container);
+  }
 
   // ---- wiring ----
-  container.querySelector('#btn-clear').addEventListener('click', () => {
-    if (confirm('Clear the form and start a new deposit?')) renderDepositForm(container);
-  });
-  container.querySelector('#btn-save').addEventListener('click', () => save(container));
-  container.querySelector('#btn-print').addEventListener('click', () => previewCurrent(container));
+  dateEl.value = currentDate;
 
-  // Live totals + clear invalid highlight on edit.
+  dateEl.addEventListener('change', async () => {
+    const newDate = dateEl.value;
+    if (!newDate) return;
+    if (formDirty && !confirm('Discard your unsaved changes and load the deposit for this date?')) {
+      dateEl.value = currentDate; // revert
+      return;
+    }
+    await loadForDate(newDate);
+  });
+
   container.addEventListener('input', (e) => {
     if (e.target.classList.contains('amount-input')) {
       e.target.classList.remove('invalid');
+      formDirty = true;
       recomputeTotals(container);
     }
   });
 
-  // Move between cells with the arrow keys instead of nudging the number value.
-  // Each row has 4 amount inputs, so up/down is ±4 in the flat list; Enter also
-  // steps down. Left/Right keep their normal text-cursor behaviour.
-  const inputs = [...body.querySelectorAll('.amount-input')];
+  // Enter / Arrow move between cells (same column) instead of nudging the value.
   body.addEventListener('keydown', (e) => {
     if (!e.target.classList.contains('amount-input')) return;
     let target = null;
@@ -143,12 +176,48 @@ export function renderDepositForm(container, opts = {}) {
     if (e.key === 'ArrowDown' || e.key === 'Enter') target = inputs[i + 4];
     else if (e.key === 'ArrowUp') target = inputs[i - 4];
     else return;
-    e.preventDefault(); // stop the number input from incrementing/decrementing
+    e.preventDefault();
     if (target) { target.focus(); target.select(); }
   });
+
+  container.querySelector('#btn-clear').addEventListener('click', () => {
+    if (confirm('Clear the amounts on this screen?')) {
+      fillFrom(null);
+      formDirty = true;
+      recomputeTotals(container);
+    }
+  });
+
+  container.querySelector('#btn-print').addEventListener('click', () => previewCurrent(container));
+
+  container.querySelector('#btn-save').addEventListener('click', async () => {
+    const date = dateEl.value;
+    if (!date) { toast('Deposit date is required.', 'error'); dateEl.focus(); return; }
+
+    const { items, hadError } = collectItems(container);
+    if (hadError) { toast('Some amounts are not valid positive numbers (highlighted).', 'error'); return; }
+    if (items.length === 0) { toast('Enter at least one cash or check amount before saving.', 'error'); return; }
+
+    const header = readHeader(container);
+    try {
+      if (editingId) {
+        await window.api.updateDeposit(editingId, header, items);
+        toast('Saved changes.', 'success');
+      } else {
+        await window.api.createDeposit(header, items);
+        toast(`Saved deposit (${items.length} lines).`, 'success');
+      }
+      await loadForDate(date); // refresh — now in edit mode for this date
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'error');
+    }
+  });
+
+  // Initial load for the opening date.
+  loadForDate(currentDate);
 }
 
-// ---- helpers ---------------------------------------------------------------
+// ---- helpers (operate on the container, no closure state) -------------------
 
 function sumSection(container, section) {
   let sum = 0;
@@ -195,9 +264,8 @@ function collectItems(container) {
 
 function readHeader(container) {
   const header = { deposit_date: container.querySelector('#f-date').value };
-  // The header now only captures the date. When editing, carry the record's
-  // other (no-longer-shown) fields through so an edit never wipes them; new
-  // deposits let the DB apply its defaults (bank 'RCBC', the rest null).
+  // The header only captures the date on screen. When editing, carry the
+  // record's other (no-longer-shown) fields through so an edit never wipes them.
   if (editingDeposit) {
     header.bank = editingDeposit.bank;
     header.account_name = editingDeposit.account_name;
@@ -214,37 +282,4 @@ function previewCurrent(container) {
   if (hadError) { toast('Fix the highlighted amounts before printing.', 'error'); return; }
   if (items.length === 0) { toast('Add at least one amount before printing.', 'warn'); return; }
   openPrintPreview({ deposit_date: container.querySelector('#f-date').value, items });
-}
-
-async function save(container) {
-  const date = container.querySelector('#f-date').value;
-  if (!date) {
-    toast('Deposit date is required.', 'error');
-    container.querySelector('#f-date').focus();
-    return;
-  }
-
-  const { items, hadError } = collectItems(container);
-  if (hadError) {
-    toast('Some amounts are not valid positive numbers (highlighted).', 'error');
-    return;
-  }
-  if (items.length === 0) {
-    toast('Enter at least one cash or check amount before saving.', 'error');
-    return;
-  }
-
-  const header = readHeader(container);
-  try {
-    if (editingId) {
-      await window.api.updateDeposit(editingId, header, items);
-      toast('Saved changes.', 'success');
-    } else {
-      await window.api.createDeposit(header, items);
-      toast(`Saved deposit (${items.length} lines).`, 'success');
-      renderDepositForm(container); // fresh form for the next entry
-    }
-  } catch (err) {
-    toast('Save failed: ' + err.message, 'error');
-  }
 }

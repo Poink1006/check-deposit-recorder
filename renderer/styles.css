@@ -100,6 +100,10 @@ body {
 .field span { font-size: 12px; color: var(--muted); font-weight: 600; }
 .field em { color: var(--danger); font-style: normal; }
 
+.date-hint { font-size: 12px; margin: 10px 0 0; }
+.date-hint.existing { color: var(--brand); }
+.date-hint.fresh { color: var(--muted); }
+
 input[type="text"], input[type="date"], input[type="number"] {
   font: inherit;
   padding: 7px 9px;
