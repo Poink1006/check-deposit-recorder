@@ -177,14 +177,27 @@ export function renderDepositForm(container, opts = {}) {
     }
   });
 
-  // Enter / Arrow move between cells (same column) instead of nudging the value.
+  // Arrow keys move between cells. Up/Down step a row (±4 in the flat list);
+  // Left/Right step one cell, but only when the cursor is already at the
+  // start/end of the value — so you can still move within a cell while editing.
   body.addEventListener('keydown', (e) => {
-    if (!e.target.classList.contains('amount-input')) return;
+    const el = e.target;
+    if (!el.classList.contains('amount-input')) return;
+    const i = inputs.indexOf(el);
     let target = null;
-    const i = inputs.indexOf(e.target);
-    if (e.key === 'ArrowDown' || e.key === 'Enter') target = inputs[i + 4];
-    else if (e.key === 'ArrowUp') target = inputs[i - 4];
-    else return;
+    if (e.key === 'ArrowDown' || e.key === 'Enter') {
+      target = inputs[i + 4];
+    } else if (e.key === 'ArrowUp') {
+      target = inputs[i - 4];
+    } else if (e.key === 'ArrowRight') {
+      if (!(el.selectionStart === el.value.length && el.selectionEnd === el.value.length)) return;
+      target = inputs[i + 1];
+    } else if (e.key === 'ArrowLeft') {
+      if (!(el.selectionStart === 0 && el.selectionEnd === 0)) return;
+      target = inputs[i - 1];
+    } else {
+      return;
+    }
     e.preventDefault();
     if (target) { target.focus(); target.select(); }
   });
