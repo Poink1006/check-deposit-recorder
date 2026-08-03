@@ -121,6 +121,35 @@ function numberLayer(deposit, opts = {}) {
   return html;
 }
 
+/**
+ * Build the TOTALS layer — the cash total under the CASH block and the check
+ * total under the CHECKS block, just below the grid, right-aligned under each
+ * section's rightmost amount column.
+ */
+function totalsLayer(deposit) {
+  let cash = 0;
+  let check = 0;
+  for (const it of deposit.items || []) {
+    const a = Number(it.amount) || 0;
+    if (a <= 0) continue;
+    if (it.section === 'CASH') cash += a;
+    else if (it.section === 'CHECK') check += a;
+  }
+
+  const y = BLOCK_BOTTOM + 1.8; // sits just under the grid's bottom border
+  const cashRight = PAIRS[1].amtRight;   // CASH 13–24 amount column
+  const checkRight = PAIRS[3].amtRight;  // CHECK 13–24 amount column
+
+  // Labels sit in the line-number column of each section's right pair, so they
+  // clear the (right-aligned) totals even in the narrow CHECK column.
+  return (
+    `<div class="cell tlabel" style="left:${PAIRS[1].numCol[0]}mm;top:${y}mm">TOTAL</div>` +
+    amtCell(cashRight, y, amountStr(cash)) +
+    `<div class="cell tlabel" style="left:${PAIRS[3].numCol[0]}mm;top:${y}mm">TOTAL</div>` +
+    amtCell(checkRight, y, amountStr(check))
+  );
+}
+
 /** Build the GRID layer (borders + section labels) for full-form / alignment. */
 function gridLayer() {
   let html = '';
@@ -203,6 +232,7 @@ function docShell(calib, bodyHtml, extraCss = '', sheetW = PAGE.w) {
     }
     .cell.num { transform: translateX(-50%); text-align: center; }
     .cell.amt { transform: translateX(-100%); text-align: right; }
+    .cell.tlabel { font-weight: 700; }
     .glabel { position: absolute; text-align: center; font-weight: 700; font-size: 3.4mm; }
     .hline { position: absolute; border-top: 0.2mm solid #000; }
     .vline { position: absolute; border-left: 0.2mm solid #000; }
@@ -225,7 +255,8 @@ function docShell(calib, bodyHtml, extraCss = '', sheetW = PAGE.w) {
 export function buildDepositSheet(deposit, calib, mode = 'overlay') {
   const grid = mode === 'full' ? gridLayer() : '';
   const nums = numberLayer(deposit);
-  const body = `<div class="calib">${grid}${nums}</div>`;
+  const totals = totalsLayer(deposit);
+  const body = `<div class="calib">${grid}${nums}${totals}</div>`;
   return docShell(calib, body);
 }
 
