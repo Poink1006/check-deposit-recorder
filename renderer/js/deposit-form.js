@@ -20,6 +20,12 @@ const ROWS = 12; // 12 rows × (2 cash + 2 check columns) = 24 cash + 24 check l
 
 let editingId = null;      // id of the deposit currently loaded, or null (new)
 let editingDeposit = null; // the loaded record (to preserve hidden header fields)
+let formDirty = false;     // unsaved amount edits since the last load/save
+
+/** Whether the deposit form has amount edits that haven't been saved. */
+export function depositHasUnsavedChanges() {
+  return formDirty;
+}
 
 /**
  * Render the deposit form into `container`.
@@ -29,7 +35,7 @@ let editingDeposit = null; // the loaded record (to preserve hidden header field
 export function renderDepositForm(container, opts = {}) {
   let initialDeposit = opts.deposit || null;
   let currentDate = initialDeposit ? initialDeposit.deposit_date : todayISO();
-  let formDirty = false; // any unsaved amount edits since the last load/save
+  formDirty = false; // reset unsaved state each time the form is (re)built
 
   container.innerHTML = `
     <div class="view-head">

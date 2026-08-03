@@ -7,7 +7,7 @@
  * container. Settings is a placeholder until Phase 5.
  */
 
-import { renderDepositForm } from './deposit-form.js';
+import { renderDepositForm, depositHasUnsavedChanges } from './deposit-form.js';
 import { renderCalibration } from './calibration.js';
 import { renderHistory } from './history.js';
 import { renderSettings } from './settings.js';
@@ -32,8 +32,20 @@ function setActiveNav(id) {
 
 let currentView = 'new';
 
+/** True while the deposit form is open with unsaved amount edits. */
+function unsavedDeposit() {
+  return currentView === 'new' && depositHasUnsavedChanges();
+}
+
 /** Switch to a top-level view by id. */
 export function navigate(id) {
+  // Warn before leaving a deposit with unsaved changes.
+  if (id !== 'new' && unsavedDeposit()) {
+    if (!confirm('You have unsaved changes on this deposit.\nLeave without saving?')) {
+      setActiveNav('new'); // keep the highlight on New Deposit
+      return;
+    }
+  }
   currentView = id;
   setActiveNav(id);
   if (id === 'new') {
@@ -69,6 +81,21 @@ navigate('new');
 
 // Wire the auto-update banner (no-op in unpacked/dev builds).
 initUpdateBanner();
+
+// Warn before closing the app with unsaved deposit changes. Electron cancels
+// the close when beforeunload sets returnValue; we then ask, and re-close if
+// the user confirms (forceClose bypasses the guard the second time).
+let forceClose = false;
+window.addEventListener('beforeunload', (e) => {
+  if (forceClose || !unsavedDeposit()) return;
+  e.returnValue = false; // cancel this close
+  setTimeout(() => {
+    if (confirm('You have unsaved changes on this deposit.\nClose without saving?')) {
+      forceClose = true;
+      window.close();
+    }
+  }, 0);
+});
 
 // Sync status badge, and refresh the History list when a pull brings new data.
 initSyncStatus();
