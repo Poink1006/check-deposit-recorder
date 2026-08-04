@@ -28,8 +28,9 @@
  * (transform-origin at the page's top-left). These values are saved per install.
  */
 
-// Legal paper, portrait (mm).
-export const PAGE = { w: 215.9, h: 355.6 };
+// Long bond / Folio paper, portrait: 8.5" × 13" (mm). The number block is
+// anchored from the TOP, so the shorter page doesn't move any content.
+export const PAGE = { w: 215.9, h: 330.2 };
 
 // Vertical layout of the 12-row block (mm).
 const ROW_TOP = 199.7;   // top of line 1
@@ -203,7 +204,7 @@ function rulerLayer(maxX) {
 function docShell(calib, bodyHtml, extraCss = '', sheetW = PAGE.w) {
   const { offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1 } = calib || {};
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-    @page { size: Legal portrait; margin: 0; }
+    @page { size: 8.5in 13in; margin: 0; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     .sheet {

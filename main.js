@@ -216,9 +216,13 @@ ipcMain.handle('backup:exportCsv', async (_evt, filters) => {
 
 // ---- IPC: printing ----------------------------------------------------------
 
+// Long bond / Folio paper size, 8.5" × 13", as the print defaults.
+const PAPER_MICRONS = { width: 215900, height: 330200 }; // for webContents.print
+const PAPER_INCHES = { width: 8.5, height: 13 };          // for printToPDF
+
 // Print an HTML sheet to a physical printer. Opens the OS print dialog
 // (silent:false) so the user can pick the printer feeding the bank form.
-// Legal paper, zero margins — the mm coordinates in the HTML are authoritative.
+// Long bond (8.5×13), zero margins — the mm coordinates in the HTML are authoritative.
 ipcMain.handle('print:sheet', (_evt, html) =>
   withPrintWindow(html, (win) =>
     new Promise((resolve) => {
@@ -228,7 +232,7 @@ ipcMain.handle('print:sheet', (_evt, html) =>
           printBackground: true,
           color: true,
           margins: { marginType: 'none' },
-          pageSize: 'Legal',
+          pageSize: PAPER_MICRONS,
           landscape: false,
         },
         (success, failureReason) => resolve({ success, failureReason })
@@ -248,7 +252,7 @@ ipcMain.handle('print:pdf', async (_evt, html, suggestedName) => {
 
   const data = await withPrintWindow(html, (win) =>
     win.webContents.printToPDF({
-      pageSize: 'Legal',
+      pageSize: PAPER_INCHES,
       printBackground: true,
       margins: { top: 0, bottom: 0, left: 0, right: 0 },
     })
